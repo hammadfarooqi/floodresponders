@@ -208,12 +208,12 @@ def layer_specs():
          "style": {"color": "#c2261d", "weight": 3.5, "dashArray": "8 6", "fillColor": "#c2261d", "fillOpacity": 0.08}},
         {"id": "hollywood_structures", "title": "Hollywood: every building (Vexcel)", "group": "Buildings",
          "build": hollywood_structures, "pane": "features", "defaultOn": True,
-         "colorBy": {"field": "source", "colors": {"Vexcel only": "#b9b7b1", "CoStar tier 4": "#008300",
+         "colorBy": {"field": "source", "colors": {"Vexcel only": "#1baf7a", "CoStar tier 4": "#008300",
                                                    "CoStar tier 3": "#2a78d6", "CoStar tier 2": "#eda100",
                                                    "CoStar tier 1": "#e87ba4"}},
-         "style": {"color": "#8a8984", "weight": 0.5, "fillOpacity": 0.8},
+         "style": {"color": "#12805a", "weight": 0.5, "fillOpacity": 0.75},
          "strokeBy": {"field": "costar_id", "present": {"color": "#1d1d1b", "weight": 1.2}},
-         "legend": [{"label": "Vexcel only (no CoStar)", "color": "#b9b7b1"}] + [
+         "legend": [{"label": "Vexcel only (no CoStar)", "color": "#1baf7a"}] + [
              {"label": f"CoStar tier {t}", "color": TIER_COLORS[str(t)]} for t in (4, 3, 2, 1)],
          "popup": ["name", "address", "source", "evacuation", "stories", "construction_material", "units",
                    "is_walkup", "is_senior", "year_built", "mp_staircases", "mp_windows", "vexcel_building_type",
