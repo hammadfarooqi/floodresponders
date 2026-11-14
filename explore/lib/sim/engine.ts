@@ -112,6 +112,8 @@ export class Simulation {
   approve?: (proposals: Proposal[]) => Proposal[];
   /** Dispatcher holds: a truck locked to a building (or held out) is not re-matched by the AI. */
   locks = new Map<string, string | null>();
+  /** Pairings the dispatcher rejected: "truck|building" -> sim minute until which the AI will not propose it again. */
+  vetoes = new Map<string, number>();
 
   constructor(data: SimData | { g: RoadGraph; buildings: DemoBuildingLite[]; stations: StationLite[] },
               policy: Policy, cfg: Partial<SimConfig> = {}) {
@@ -370,16 +372,16 @@ export class Simulation {
       let bestI = -1, bestEta = Infinity;
       for (const i of open) {
         const { tr, ti } = free[i];
+        if ((this.vetoes.get(`${tr.id}|${b.id}`) ?? -1) > this.t) continue;
         let eta = (this.dist[ti][b.node] + srcs[i].offset) / this.speedMpm;
-        if (tr.building === b.id) eta -= 1; // small preference to keep the current pairing (less churn)
+        if (tr.building === b.id) eta -= 3; // keep the current pairing unless another truck is >3 min faster (less churn)
         if (eta < bestEta) { bestEta = eta; bestI = i; }
       }
       if (bestI < 0 || this.t + bestEta > b.fire - this.cfg.arrive_before_fire_min) continue; // nobody can arrive in time
       open.delete(bestI);
       const { tr } = free[bestI];
-      const left = Math.round(b.fire - this.t);
       proposals.push({ truck: tr.id, building: b.id, eta_min: Math.max(0, bestEta),
-        reason: `${Math.round(b.needKnown)} need help, fire in ${left} min.`, prev: tr.building });
+        reason: `${Math.round(b.needKnown)} need help.`, prev: tr.building });
     }
     const final = this.approve ? this.approve(proposals) : proposals;
     const chosen = new Set(final.map(p => p.truck));
@@ -400,6 +402,41 @@ export class Simulation {
         this.free(tr);
       }
     }
+  }
+
+  // ---------- dispatcher actions (console) ----------
+  /** Send a truck to a building now (an approved or edited proposal). Returns false if it is not possible. */
+  applyProposal(p: { truck: string; building: string; reason: string }): boolean {
+    const ti = this.trucks.findIndex(x => x.id === p.truck);
+    const tr = this.trucks[ti], b = this.byId.get(p.building);
+    if (!tr || !b || b.burned || tr.status === "unavailable" || b.node < 0) return false;
+    if (tr.status === "on_scene" && tr.building !== b.id) {
+      this.say({ kind: "unassign", truck: tr.id, building: tr.building!, text: `${tr.name} leaves ${this.byId.get(tr.building!)!.label} (dispatcher).` });
+      tr.status = "idle";
+    }
+    if (tr.building === b.id) return true;
+    const src = this.source(tr);
+    this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], Infinity);
+    if (!Number.isFinite(this.dist[ti][b.node])) return false;
+    this.dispatch(tr, ti, b, src.offset, p.reason);
+    return true;
+  }
+
+  outOfService(truckId: string, minutes: number, why: string) {
+    const tr = this.trucks.find(x => x.id === truckId);
+    if (!tr) return;
+    this.say({ kind: "event", truck: tr.id, speaker: "Dispatcher", text: `${tr.name} out of service${minutes < 999 ? ` for ${minutes} min` : ""}: ${why}` });
+    this.applyEvent({ type: "driver_declines", truck_id: truckId, reason: why, out_min: minutes });
+  }
+
+  backInService(truckId: string) {
+    const tr = this.trucks.find(x => x.id === truckId);
+    if (!tr || tr.status !== "unavailable") return;
+    tr.unavailable_until = this.t;
+  }
+
+  veto(truckId: string, buildingId: string, minutes = 10) {
+    this.vetoes.set(`${truckId}|${buildingId}`, this.t + minutes);
   }
 
   // ---------- agent events ----------

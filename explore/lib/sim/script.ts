@@ -34,12 +34,19 @@ function notifications(sim: Simulation, fromIdx: number, t: number): Line[] {
 export function driverDeclines(sim: Simulation): Line[] {
   const t = sim.t;
   const driving = sim.trucks.filter(tr => tr.status === "en_route" && tr.building);
-  if (!driving.length) return [];
-  const tr = driving.reduce((a, b) => ((a.eta_min ?? 0) >= (b.eta_min ?? 0) ? a : b));
+  const working = sim.trucks.filter(tr => tr.status === "on_scene" && tr.building);
+  const pool = driving.length ? driving : working;
+  if (!pool.length) return [];
+  const tr = pool.reduce((a, b) => ((a.eta_min ?? 0) >= (b.eta_min ?? 0) ? a : b));
   const b = sim.byId.get(tr.building!)!;
+  const onScene = tr.status === "on_scene";
   const lines: Line[] = [
-    { t, speaker: "Roll Call", to: tr.name, text: `${tr.name}, confirm you are heading to ${b.label}, ${Math.round(b.needKnown)} people need help.` },
-    { t, speaker: "Driver", to: "Roll Call", text: `Negative. We stopped for a man down on Franklin, cardiac. We're committed here for about ${DECLINE.out_min} minutes.` },
+    { t, speaker: "Roll Call", to: tr.name, text: onScene
+      ? `${tr.name}, status check at ${b.label}: ${Math.round(b.needKnown)} people still need help. How long do you need?`
+      : `${tr.name}, confirm you are heading to ${b.label}, ${Math.round(b.needKnown)} people need help.` },
+    { t, speaker: "Driver", to: "Roll Call", text: onScene
+      ? `We have to leave. Man down on Franklin, cardiac, and we're the closest unit. We'll be committed for about ${DECLINE.out_min} minutes.`
+      : `Negative. We stopped for a man down on Franklin, cardiac. We're committed here for about ${DECLINE.out_min} minutes.` },
     { t, speaker: "Roll Call", to: tr.name, text: `Understood. I'm marking ${tr.name} out of service for ${DECLINE.out_min} minutes and moving ${b.label} to another truck.` },
   ];
   const from = sim.log.length;
@@ -49,7 +56,8 @@ export function driverDeclines(sim: Simulation): Line[] {
   sim.rematch(true);
   const notes = notifications(sim, from, t);
   const taker = sim.trucks.find(x => x.building === b.id);
-  if (!taker) lines.push({ t, speaker: "System",
+  if (!taker && sim.approve) lines.push({ t, speaker: "System", text: `New pairing for ${b.label} sent to the dispatcher for approval.` });
+  else if (!taker) lines.push({ t, speaker: "System",
     text: `No other truck is free and able to reach ${b.label} before the fire right now (the others are working at buildings). It stays in the queue for the next free truck.` });
   return [...lines, ...notes];
 }
@@ -72,7 +80,9 @@ export function tenantStuck(sim: Simulation): Line[] {
   const sent = sim.trucks.find(tr => tr.building === b.id);
   lines.push(sent
     ? { t, speaker: "Roll Call", to: "Supervisor", text: `${sent.name} is on its way to you, ETA ${mins(sent.eta_min ?? 0)}. I'll call back if that changes.` }
-    : { t, speaker: "Roll Call", to: "Supervisor", text: `Every truck is busy right now. You are next in the queue; I'll call you back with an ETA.` });
+    : sim.approve
+      ? { t, speaker: "Roll Call", to: "Supervisor", text: `I'm asking the dispatcher to approve a truck for you now. I'll call you back with the ETA.` }
+      : { t, speaker: "Roll Call", to: "Supervisor", text: `Every truck is busy right now. You are next in the queue; I'll call you back with an ETA.` });
   return [...lines, ...notes];
 }
 

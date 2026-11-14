@@ -1,41 +1,28 @@
 "use client";
 // /sim: the old way (nearest building, never re-plan) vs Roll Call AI dispatch, on the same fire, people and trucks.
-import maplibregl, { type GeoJSONSource } from "maplibre-gl";
+import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { style } from "../3d/mapStyle";
-import { RoadGraph, type RoadsJson } from "../../lib/sim/graph";
-import { DEFAULT_CONFIG, Simulation, type DemoBuildingLite, type LogEntry, type Policy, type StationLite } from "../../lib/sim/engine";
+import { DEFAULT_CONFIG, Simulation, type LogEntry, type Policy } from "../../lib/sim/engine";
+import { ABLE_PER_DOT, COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, type Loaded } from "./simMap";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 
-const DURATION = 180, RUN_SECONDS = 25, FRONT_MIN = 10;
+const DURATION = 180, RUN_SECONDS = 25;
 const VIEW = { center: [-118.338, 34.094] as [number, number], zoom: 13.75, pitch: 45, bearing: 0 };
-const ABLE_PER_DOT = 25;
-const COLORS = { able: "#22c55e", need: "#c084fc", trapped: "#ef4444", truck: "#f97316", onscene: "#16a34a" };
 const RUNS: Record<Policy, { n: number; title: string; sub: string }> = {
   nearest: { n: 1, title: "Old way", sub: "Each free truck goes to the nearest building that needs help. It never re-plans." },
   ours: { n: 2, title: "Roll Call AI", sub: "Ranks buildings by people needing help × urgency, sends a truck only if it can arrive before the fire, re-matches every 5 min and after every call." },
 };
 
 type Counts = Simulation["counts"];
-interface Walker { lng: number; lat: number; dx: number; dy: number; t0: number; life: number; kind: "able" | "need" }
-interface Loaded { g: RoadGraph; buildings: DemoBuildingLite[]; stations: StationLite[]; origin: [number, number];
-                   cells: { id: number; t: number }[]; arrivals: [string, number][] }
-
-const fmtT = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
-const n0 = (x: number) => Math.round(x).toLocaleString("en-US");
 
 export default function SimView() {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const data = useRef<Loaded | null>(null);
   const sim = useRef<Simulation | null>(null);
-  const markers = useRef<Map<string, { m: maplibregl.Marker; el: HTMLDivElement }>>(new Map());
-  const walkers = useRef<Walker[]>([]);
-  const spawned = useRef<Float64Array>(new Float64Array(0));     // able people already shown as dots, per building
-  const spawnedNeed = useRef<Float64Array>(new Float64Array(0));
-  const shown = useRef<Int32Array>(new Int32Array(0));            // last people-dot bucket, per building
-  const firePtr = useRef({ burn: 0, cool: 0, bld: 0 });
+  const renderer = useRef<SimRenderer | null>(null);
   const moments = useRef<{ t: number; fn: (s: Simulation) => Line[]; done: boolean }[]>([]);
   const logSeen = useRef(0);
   const callAt = useRef<number | null>(null);
@@ -59,56 +46,22 @@ export default function SimView() {
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.current = m;
     (window as unknown as { __map?: maplibregl.Map }).__map = m;
-    const fetchJson = (u: string) => fetch(u).then(r => { if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.json(); });
-    const loadedMap = new Promise<void>(res => m.once("load", () => res()));
-    Promise.all([fetchJson("/api/sim"), fetchJson("/api/demo/roads.json"), fetchJson("/api/demo/fire_cells.geojson"),
-                 fetchJson("/api/demo/building_arrivals.json"), fetchJson("/api/demo/fire_timeline.json"), loadedMap])
-      .then(([simData, roads, cells, arrivals, timeline]) => {
-        const d: Loaded = {
-          g: new RoadGraph(roads as RoadsJson), buildings: simData.buildings, stations: simData.stations,
-          origin: timeline.origin,
-          cells: (cells.features as { properties: { t: number } }[]).map((f, id) => ({ id, t: f.properties.t })).sort((a, b) => a.t - b.t),
-          arrivals,
-        };
-        data.current = d;
-        m.addSource("people", { type: "geojson", promoteId: "id", data: { type: "FeatureCollection",
-          features: d.buildings.map(b => ({ type: "Feature", properties: { id: b.id }, geometry: { type: "Point", coordinates: [b.lng, b.lat] } })) } });
-        m.addSource("walkers", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        m.addSource("routes", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        m.addSource("links", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        m.addLayer({ id: "routes", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#fde68a", "line-width": 2.5, "line-opacity": 0.55 } });
-        m.addLayer({ id: "links", type: "line", source: "links",
-          paint: { "line-color": "#fff7ed", "line-width": 2, "line-dasharray": [2, 2] } });
-        m.addLayer({ id: "targets", type: "circle", source: "links", filter: ["==", ["get", "end"], 1],
-          paint: { "circle-radius": 11, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#fff7ed", "circle-stroke-width": 2.5,
-                   "circle-pitch-alignment": "map" } });
-        m.addLayer({ id: "people", type: "circle", source: "people",
-          paint: {
-            "circle-radius": ["interpolate", ["linear"], ["coalesce", ["feature-state", "n"], 0], 0, 0, 1, 2, 10, 3, 100, 5.5, 400, 9],
-            "circle-color": ["case", ["boolean", ["feature-state", "trapped"], false], COLORS.trapped,
-                             ["boolean", ["feature-state", "need"], false], COLORS.need, COLORS.able],
-            "circle-stroke-color": "#111", "circle-stroke-width": 0.6,
-            "circle-opacity": ["case", ["any", ["boolean", ["feature-state", "trapped"], false], [">", ["coalesce", ["feature-state", "n"], 0], 0]], 0.92, 0],
-            "circle-stroke-opacity": ["case", ["any", ["boolean", ["feature-state", "trapped"], false], [">", ["coalesce", ["feature-state", "n"], 0], 0]], 0.9, 0],
-          } });
-        m.addLayer({ id: "walkers", type: "circle", source: "walkers",
-          paint: { "circle-radius": ["match", ["get", "k"], "need", 3.2, 2.2],
-                   "circle-color": ["match", ["get", "k"], "need", COLORS.need, COLORS.able], "circle-opacity": ["get", "o"] } });
-        m.on("click", "people", e => {
-          const id = e.features?.[0]?.properties?.id as string | undefined;
-          const b = id ? sim.current?.byId.get(id) : undefined;
-          if (!b) return;
-          new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(
-            `<b>${b.label}</b><div style="font-size:12px;line-height:1.5">Fire arrives at ${fmtT(b.fire)}<br>` +
-            `Inside: ${n0(b.able + b.need)} (need help: ${n0(b.need)})<br>Evacuated: ${n0(b.evacuated)}<br>Trapped: ${n0(b.trapped)}` +
-            `${b.costar ? "<br>CoStar: manager phone on file" : ""}</div>`).addTo(m);
-        });
-        m.on("mouseenter", "people", () => { m.getCanvas().style.cursor = "pointer"; });
-        m.on("mouseleave", "people", () => { m.getCanvas().style.cursor = ""; });
-        setReady(true);
-      })
-      .catch(err => { console.error(err); alertBox(String(err)); });
+    loadSimLayers(m).then(d => {
+      data.current = d;
+      renderer.current = new SimRenderer(m, d);
+      m.on("click", "people", e => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        const b = id ? sim.current?.byId.get(id) : undefined;
+        if (!b) return;
+        new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(
+          `<b>${b.label}</b><div style="font-size:12px;line-height:1.5">Fire arrives at ${fmtT(b.fire)}<br>` +
+          `Inside: ${n0(b.able + b.need)} (need help: ${n0(b.need)})<br>Evacuated: ${n0(b.evacuated)}<br>Trapped: ${n0(b.trapped)}` +
+          `${b.costar ? "<br>CoStar: manager phone on file" : ""}</div>`).addTo(m);
+      });
+      m.on("mouseenter", "people", () => { m.getCanvas().style.cursor = "pointer"; });
+      m.on("mouseleave", "people", () => { m.getCanvas().style.cursor = ""; });
+      setReady(true);
+    }).catch(err => { console.error(err); alertBox(String(err)); });
     return () => { m.remove(); map.current = null; };
   }, []);
 
@@ -124,23 +77,7 @@ export default function SimView() {
       { t: STUCK.call_min, fn: s2 => { callAt.current = s2.t; return tenantStuck(s2); }, done: false },
     ] : [];
     callAt.current = null; logSeen.current = 0; clock.current = 0;
-    // map state
-    m.removeFeatureState({ source: "fire" }); m.removeFeatureState({ source: "buildings" }); m.removeFeatureState({ source: "people" });
-    firePtr.current = { burn: 0, cool: 0, bld: 0 };
-    shown.current = new Int32Array(s.buildings.length).fill(-1);
-    spawned.current = new Float64Array(s.buildings.length);
-    spawnedNeed.current = new Float64Array(s.buildings.length);
-    walkers.current = [];
-    for (const b of s.buildings) s.dirty.add(b.idx);
-    for (const { el: e, m: mk } of markers.current.values()) { mk.remove(); void e; }
-    markers.current.clear();
-    for (const tr of s.trucks) {
-      const e = document.createElement("div");
-      e.className = "truck";
-      e.textContent = String(tr.station);
-      const mk = new maplibregl.Marker({ element: e }).setLngLat([tr.lng, tr.lat]).addTo(m);
-      markers.current.set(tr.id, { m: mk, el: e });
-    }
+    renderer.current?.reset(s);
     setLines([]); setPolicy(p); setPlaying(false);
     draw();
     setFrame(f => f + 1);
@@ -148,73 +85,7 @@ export default function SimView() {
 
   useEffect(() => { if (ready) start("nearest"); }, [ready, start]);
 
-  // ---------- draw the current sim state on the map ----------
-  const draw = () => {
-    const m = map.current, s = sim.current, d = data.current;
-    if (!m || !s || !d) return;
-    const t = s.t;
-    // fire cells and burned buildings (feature-state, once per entity)
-    const p = firePtr.current, c = d.cells, a = d.arrivals;
-    while (p.burn < c.length && c[p.burn].t <= t) { m.setFeatureState({ source: "fire", id: c[p.burn].id }, { burned: true, front: true }); p.burn++; }
-    while (p.cool < p.burn && c[p.cool].t <= t - FRONT_MIN) { m.setFeatureState({ source: "fire", id: c[p.cool].id }, { front: false }); p.cool++; }
-    while (p.bld < a.length && a[p.bld][1] <= t) { m.setFeatureState({ source: "buildings", id: a[p.bld][0] }, { burned: true }); p.bld++; }
-    // people dots: update only when the visible bucket changes
-    const ox = d.origin[0], oy = d.origin[1];
-    for (const idx of s.dirty) {
-      const b = s.buildings[idx];
-      const inside = b.able + b.need;
-      const q = b.trapped >= 0.5 ? 10000 + Math.round(b.trapped) : inside < 0.5 ? 0 : Math.max(1, Math.round(Math.sqrt(inside) * 3)) * 2 + (b.need >= 0.5 ? 1 : 0);
-      if (q !== shown.current[idx]) {
-        shown.current[idx] = q;
-        m.setFeatureState({ source: "people", id: b.id },
-          b.trapped >= 0.5 ? { n: Math.max(1, b.trapped), trapped: true, need: true } : { n: inside < 0.5 ? 0 : inside, need: b.need >= 0.5, trapped: false });
-      }
-      // walkers: people leaving, moving away from the fire origin
-      let dx = b.lng - ox, dy = b.lat - oy; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-      const ableOut = b.evacuated - b.evacuatedNeed;
-      while (ableOut - spawned.current[idx] >= ABLE_PER_DOT && walkers.current.length < 1500) {
-        spawned.current[idx] += ABLE_PER_DOT;
-        const j = ((idx * 7919 + spawned.current[idx]) % 100) / 100 - 0.5;
-        walkers.current.push({ lng: b.lng, lat: b.lat, dx: dx + j * 0.8, dy: dy - j * 0.8, t0: t, life: 6, kind: "able" });
-      }
-      while (b.evacuatedNeed - spawnedNeed.current[idx] >= 1 && walkers.current.length < 1500) {
-        spawnedNeed.current[idx] += 1;
-        const j = ((idx * 104729 + spawnedNeed.current[idx] * 31) % 100) / 100 - 0.5;
-        walkers.current.push({ lng: b.lng, lat: b.lat, dx: dx + j, dy: dy - j, t0: t, life: 8, kind: "need" });
-      }
-    }
-    s.dirty.clear();
-    walkers.current = walkers.current.filter(w => t - w.t0 < w.life);
-    const DEG_PER_M = 1 / 111000;
-    (m.getSource("walkers") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: walkers.current.map(w => {
-      const age = t - w.t0, dist = (w.kind === "need" ? 60 : 80) * age * DEG_PER_M;
-      return { type: "Feature", properties: { k: w.kind, o: Math.max(0, 1 - age / w.life) },
-               geometry: { type: "Point", coordinates: [w.lng + w.dx * dist / Math.cos(w.lat * Math.PI / 180), w.lat + w.dy * dist] } };
-    }) });
-    // trucks, their remaining route, and the dashed link to the assigned building
-    const routes: GeoJSON.Feature[] = [], links: GeoJSON.Feature[] = [];
-    for (const tr of s.trucks) {
-      const mk = markers.current.get(tr.id);
-      if (mk) {
-        mk.m.setLngLat([tr.lng, tr.lat]);
-        mk.el.dataset.status = tr.status;
-        mk.el.title = `${tr.name}: ${tr.status.replace("_", " ")}${tr.building ? " → " + s.byId.get(tr.building)?.label : ""}`;
-      }
-      if (!tr.building) continue;
-      const b = s.byId.get(tr.building)!;
-      links.push({ type: "Feature", properties: { end: 0 }, geometry: { type: "LineString", coordinates: [[tr.lng, tr.lat], [b.lng, b.lat]] } });
-      links.push({ type: "Feature", properties: { end: 1 }, geometry: { type: "Point", coordinates: [b.lng, b.lat] } });
-      if (tr.status === "en_route" && tr.path.length > 1) {
-        let i = 1; while (i < tr.cum.length - 1 && tr.cum[i] < tr.pos_m) i++;
-        const coords: [number, number][] = [[tr.lng, tr.lat]];
-        for (let k = i; k < tr.path.length; k++) { const n = tr.path[k]; if (n >= 0) coords.push([d.g.lng[n], d.g.lat[n]]); }
-        coords.push([b.lng, b.lat]);
-        routes.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } });
-      }
-    }
-    (m.getSource("routes") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: routes });
-    (m.getSource("links") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: links });
-  };
+  const draw = () => { if (sim.current) renderer.current?.draw(sim.current); };
 
   // ---------- playback ----------
   useEffect(() => {
@@ -275,7 +146,7 @@ export default function SimView() {
 
   return (
     <div className="sim-root">
-      <style>{CSS}</style>
+      <style>{CSS + TRUCK_CSS}</style>
       <div ref={el} className="sim-map" />
       {!ready && <div className="loading">Loading fire, roads and buildings…</div>}
 
@@ -439,9 +310,5 @@ const CSS = `
 .result td{padding:3px 0;text-align:right;font-variant-numeric:tabular-nums;font-size:15px}
 .result td:first-child{text-align:left;font-size:12px;color:#d4d4d8}
 .next{width:100%;justify-content:center;margin-top:4px}
-.truck{background:#f97316;color:#111;font:700 11px/1 -apple-system,sans-serif;padding:3px 4px;border-radius:4px;border:2px solid #fff;box-shadow:0 1px 6px #000a;transition:background .3s}
-.truck[data-status=on_scene]{background:#22c55e}
-.truck[data-status=idle]{background:#d4d4d8}
-.truck[data-status=unavailable]{background:#52525b;color:#fff;border-style:dashed}
 @media (max-width:900px){.right{display:none}.left{width:calc(100vw - 24px)}}
 `;
