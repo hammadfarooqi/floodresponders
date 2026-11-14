@@ -22,7 +22,7 @@ call its manager.
 
 | Part | Choice |
 |---|---|
-| `web/` | Next.js + TypeScript. Map library: TBD |
+| `web/` | Next.js + TypeScript. CesiumJS for the 3D building map |
 | `api/` | Python, FastAPI, Pydantic models, pytest, ruff |
 | `agent/` | Python, LangChain Deep Agents (`deepagents` package). LLM provider: TBD |
 | Voice or phone for the call | TBD (human decision) |
@@ -146,7 +146,6 @@ How the manager side of the call is produced (real phone call, voice in the brow
 | LLM provider key | agent | TBD, name depends on the provider |
 | Voice or phone provider keys | agent | TBD |
 | `MATTERPORT_API_KEY`, `MATTERPORT_API_TOKEN`, `MATTERPORT_SDK_KEY`, `VEXCEL_API_KEY`, `COSTAR_KIT_ZIP_PASSWORD` | data | Sponsor keys, in the root `.env`. CoStar data is a local kit at `data/costar-kit/`, not an API. See `data/README.md` |
-| Map token | web | TBD, only if the map library needs one |
 
 Never commit secrets. Use a local `.env` file. `.env*` is in `.gitignore`. Each area keeps a `.env.example`
 with names only.

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import "cesium/Build/Cesium/Widgets/widgets.css";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Roll Call",
