@@ -33,7 +33,7 @@ call its manager.
 
 Sponsor data comes from CoStar Group (CoStar, Vexcel, Matterport). We have access to all three (tested
 2026-11-14): Matterport and Vexcel by API, CoStar as a local data kit. They cover Houston and Los Angeles only.
-`data/README.md` lists what each source gives, the pipeline, and the LA focus area decision.
+The exploration work (probes, pipeline, maps) lives on branch `hammad_1` (`data/README.md` there). Decisions are in the coord log.
 
 | Source | Fields it gives |
 |---|---|
@@ -145,7 +145,7 @@ How the manager side of the call is produced (real phone call, voice in the brow
 | `NEXT_PUBLIC_API_URL` | web | API base URL, for example `http://localhost:8001` |
 | LLM provider key | agent | TBD, name depends on the provider |
 | Voice or phone provider keys | agent | TBD |
-| `MATTERPORT_API_KEY`, `MATTERPORT_API_TOKEN`, `MATTERPORT_SDK_KEY`, `VEXCEL_API_KEY`, `COSTAR_KIT_ZIP_PASSWORD` | data | Sponsor keys, in the root `.env`. CoStar data is a local kit at `data/costar-kit/`, not an API. See `data/README.md` |
+| `MATTERPORT_API_KEY`, `MATTERPORT_API_TOKEN`, `MATTERPORT_SDK_KEY`, `VEXCEL_API_KEY`, `COSTAR_KIT_ZIP_PASSWORD` | data | Sponsor keys, in the root `.env`. CoStar data is a local kit at `data/costar-kit/`, not an API. Probes and pipeline: branch `hammad_1`, `data/README.md` |
 | Map token | web | TBD, only if the map library needs one |
 
 Never commit secrets. Use a local `.env` file. `.env*` is in `.gitignore`. Each area keeps a `.env.example`
