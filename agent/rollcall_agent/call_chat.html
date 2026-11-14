@@ -33,6 +33,11 @@
   label{font-size:.85rem;font-weight:700;display:block}
   textarea{width:100%;border:1px solid var(--line);border-radius:.5rem;display:block;min-height:4.5rem;resize:vertical;margin:.4rem 0 .65rem;padding:.6rem;color:var(--ink);background:#fff}
   .actions{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
+  .channels{margin-top:1.15rem;gap:.75rem}
+  a{color:var(--green);font-weight:650;text-underline-offset:.2em}
+  .channels a{padding:.35rem 0}
+  .channels a[aria-current=page]{text-decoration-thickness:2px;color:var(--ink)}
+  #pair{display:inline-block;margin-bottom:.65rem}
   #status{font-size:.82rem;margin-top:.45rem}#status:empty{display:none}
   dl{margin:1rem 0 0}dl div{border-top:1px solid var(--line);padding:.65rem 0;display:flex;justify-content:space-between;gap:.6rem}
   dt{color:var(--muted);font-size:.85rem}dd{margin:0;text-align:right;font-weight:650;overflow-wrap:anywhere}
@@ -43,16 +48,21 @@
 <main class="wrap">
   <div class="heading">
     <h1>Dispatcher console</h1>
-    <p>Call a building manager and capture who needs evacuation assistance.</p>
+    <p>Contact a building manager and capture who needs evacuation assistance.</p>
+    <nav class="actions channels" aria-label="Contact channel">
+      <a id="call-channel" href="/" aria-current="page">Browser call</a>
+      <a id="telegram-channel" href="/?channel=telegram">Telegram</a>
+    </nav>
   </div>
   <div class="layout">
     <section class="card" aria-labelledby="building">
       <div class="card-top">
-        <div class="contact"><h2 id="building">Magnolia Court</h2><p>Building manager · (213) 555-0103 · fictional</p></div>
+        <div class="contact"><h2 id="building">Magnolia Court</h2><p id="contact-detail">Building manager · (213) 555-0103 · fictional</p></div>
         <button id="call" class="primary" type="button" disabled>Call building manager</button>
       </div>
       <div class="content">
         <p id="empty">You’ll play the manager. Roll Call speaks for dispatch.</p>
+        <a id="pair" hidden target="_blank" rel="noreferrer">Open Telegram and tap Start</a>
         <ol id="chat" class="chat" aria-label="Call transcript" aria-live="polite"></ol>
         <form id="reply" hidden>
           <label for="message">Reply as building manager</label>
@@ -81,6 +91,8 @@
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
+  const telegramMode = new URLSearchParams(location.search).get("channel") === "telegram";
+  let telegram;
   let session;
   let report = {};
   let lastReply;
@@ -92,7 +104,8 @@
     const item = document.createElement("li");
     const speaker = document.createElement("strong");
     item.dataset.role = role;
-    speaker.textContent = role === "dispatch" ? "Roll Call dispatch" : "You · Building manager";
+    speaker.textContent = role === "dispatch" ? "Roll Call dispatch" :
+      telegramMode && !telegram.mock ? "Building manager · Telegram" : "You · Building manager";
     item.append(speaker, document.createTextNode(text));
     $("chat").append(item);
     $("chat").scrollTop = $("chat").scrollHeight;
@@ -111,7 +124,7 @@
 
   function renderReport(complete = false) {
     for (const field of ["count", "unit", "need"]) $(field).textContent = report[field] ?? "—";
-    $("progress").textContent = complete ? "Report received" : "On call";
+    $("progress").textContent = complete ? "Report received" : telegramMode ? "Awaiting reply" : "On call";
     $("report-hint").textContent = complete ? "Report ready for dispatch review." : "Collecting the manager’s report.";
   }
 
@@ -123,12 +136,73 @@
   }
 
   function updateControls() {
-    $("call").disabled = busy || Boolean(recorder);
+    $("call").disabled = busy || Boolean(recorder) || (telegramMode &&
+      (!telegram || (!telegram.mock && (!telegram.paired || Boolean(telegram.health))) ||
+        (telegram.transcript.length > 0 && !telegram.complete)));
     $("send").disabled = busy || Boolean(recorder);
     $("dictate").disabled = busy || !session?.dictation;
   }
 
-  $("call").onclick = () => {
+  function renderTelegram(next) {
+    if (telegram && next.revision < telegram.revision) return;
+    const changed = telegram?.revision !== next.revision;
+    telegram = next;
+    $("contact-detail").textContent = next.mock ? "Telegram simulation · fictional manager" : "Telegram · fictional manager";
+    $("pair").hidden = !next.link;
+    if (next.link) $("pair").href = next.link;
+    const started = next.transcript.length > 0;
+    $("empty").hidden = started && !next.complete && next.mock;
+    $("empty").textContent = next.mock
+      ? (next.complete ? "The simulated manager’s report is ready." : "Try the Telegram conversation here with fictional details.")
+      : next.paired
+        ? (started && !next.complete ? "Waiting for the manager to reply in Telegram." : "Manager paired. Use fictional details for this exercise.")
+        : "Pair a private Telegram chat for the fictional building manager.";
+    $("reply").hidden = !next.mock || !started || next.complete;
+    $("call").textContent = next.complete ? "Send new Telegram request" : "Message building manager";
+    if (changed && started) {
+      $("chat").replaceChildren();
+      for (const item of next.transcript) line(item.role, item.text);
+      report = next.report;
+      renderReport(next.complete);
+    }
+    updateControls();
+  }
+
+  async function refreshTelegram() {
+    try {
+      const response = await fetch("/telegram");
+      if (!response.ok) throw new Error("Could not load the Telegram exercise.");
+      const next = await response.json();
+      if (!busy) {
+        if (next.health || $("status").dataset.pollError) {
+          $("status").textContent = next.health;
+          $("status").dataset.pollError = next.health;
+        }
+        renderTelegram(next);
+      }
+    } catch (error) {
+      $("status").textContent = error.message;
+      $("status").dataset.pollError = "true";
+    }
+    if (!telegram?.mock) setTimeout(refreshTelegram, 1500);
+  }
+
+  $("call").onclick = async () => {
+    if (telegramMode) {
+      busy = true;
+      updateControls();
+      $("status").textContent = "";
+      try {
+        renderTelegram(await post("/telegram/start", "{}", "application/json"));
+        if (telegram.mock) $("message").focus();
+      } catch (error) {
+        $("status").textContent = error.message;
+      } finally {
+        busy = false;
+        updateControls();
+      }
+      return;
+    }
     report = {};
     $("chat").replaceChildren();
     $("message").value = "";
@@ -157,6 +231,13 @@
     updateControls();
     $("status").textContent = "";
     try {
+      if (telegramMode) {
+        renderTelegram(await post("/telegram/reply", JSON.stringify({message}), "application/json"));
+        $("message").value = "";
+        if (telegram.complete) $("call").focus();
+        else $("message").focus();
+        return;
+      }
       const next = await post("/reply", JSON.stringify({message, report}), "application/json");
       line("manager", message);
       line("dispatch", next.reply);
@@ -245,7 +326,16 @@
     }
   };
 
-  fetch("/session").then((response) => {
+  if (telegramMode) {
+    $("call-channel").removeAttribute("aria-current");
+    $("telegram-channel").setAttribute("aria-current", "page");
+    $("call").textContent = "Message building manager";
+    $("dictate").hidden = true;
+    $("chat").setAttribute("aria-label", "Telegram transcript");
+    $("progress").textContent = "Waiting for request";
+    $("empty").textContent = "Loading Telegram exercise…";
+    refreshTelegram();
+  } else fetch("/session").then((response) => {
     if (!response.ok) throw Error("Could not connect to the local demo.");
     return response.json();
   }).then((data) => {

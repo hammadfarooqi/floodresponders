@@ -55,3 +55,28 @@ Unpack the [small English Vosk model](https://alphacephei.com/vosk/models) and p
 `--model-dir PATH_TO_UNPACKED_MODEL`. Click **Dictate**, allow the browser to use the microphone, and click
 **Stop recording** when finished. The browser sends the clip to localhost for transcription and prompts you
 to review it before sending. Audio is processed in memory. Downloading the model is a one-time setup.
+
+### Telegram manager exercise
+
+Choose **Telegram** in the dispatcher console. With no token, **Message building manager** opens a
+simulation in the browser. Try `Two people`, `3B`, and `Stairs` to see the follow-up messages and report.
+
+For a live Telegram exercise, create a dedicated demo bot using [@BotFather](https://t.me/BotFather).
+After installing the agent, start the console from PowerShell 7:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = Read-Host -MaskInput "Paste your demo bot token"
+python -m rollcall_agent.call_chat --port 3026
+```
+
+Open `http://127.0.0.1:3026/?channel=telegram`. On the manager's phone or Telegram Desktop, open the
+pairing link and tap **Start**. Keep that link private. In the dispatcher console, click
+**Message building manager**. Use Telegram's **Reply** on each bot prompt. The dispatcher console
+shows the conversation and report as replies arrive. Restart the local server to pair another chat.
+Clear the token from the shell after stopping the demo with `Remove-Item Env:TELEGRAM_BOT_TOKEN`.
+
+The server uses the free Telegram Bot API for one private chat, long polling, and text messages.
+Use a dedicated bot with no webhook or other active poller. The exercise uses a scripted responder
+without model charges. Use only fictional details since messages go through Telegram and remain in
+the Telegram chat. The localhost report lives in memory. This exercise does not place voice calls
+or update a live dispatch queue.
