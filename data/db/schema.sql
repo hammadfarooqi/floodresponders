@@ -49,7 +49,7 @@ create table if not exists buildings (
   vexcel_height_m       numeric,
   vexcel_building_type  text,
   is_primary_on_parcel  boolean,
-  roof_condition        int,                  -- 1 (worst) to 5 (best)
+  roof_condition        int,                  -- 1 to 5; direction not documented (see DATABASE.md)
   roof_material         text,
   roof_shape            text,
   tree_density_zone1    numeric,              -- rings around the structure, nearest first
