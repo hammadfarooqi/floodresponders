@@ -1,0 +1,69 @@
+# Posts to Discord when a major PR merges into main.
+# Major = has the `major` label, or changes more than 300 lines (additions + deletions).
+# The message includes the CI result for the PR's last commit.
+# Needs the repo secret DISCORD_WEBHOOK_URL. Without it, the job skips and stays green.
+name: discord-merge-notify
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  checks: read
+  pull-requests: read
+
+jobs:
+  notify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          NUM: ${{ github.event.pull_request.number }}
+          TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          MERGER: ${{ github.event.pull_request.merged_by.login }}
+          URL: ${{ github.event.pull_request.html_url }}
+          ADDS: ${{ github.event.pull_request.additions }}
+          DELS: ${{ github.event.pull_request.deletions }}
+          FILES: ${{ github.event.pull_request.changed_files }}
+          HAS_MAJOR_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'major') }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::notice::DISCORD_WEBHOOK_URL is not set, skipping"; exit 0
+          fi
+          if [ "$HAS_MAJOR_LABEL" != "true" ] && [ $((ADDS + DELS)) -le 300 ]; then
+            echo "Not major (+$ADDS -$DELS, no major label), skipping"; exit 0
+          fi
+
+          runs=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs')
+          failed=$(jq -r '[.[] | select(.conclusion | IN("failure","timed_out","cancelled","action_required","startup_failure")) | .name] | join(", ")' <<<"$runs")
+          pending=$(jq -r '[.[] | select(.status != "completed") | .name] | join(", ")' <<<"$runs")
+          total=$(jq 'length' <<<"$runs")
+
+          if [ -n "$failed" ]; then
+            ci="FAILED: $failed"; color=15158332
+          elif [ -n "$pending" ]; then
+            ci="Still running at merge: $pending"; color=15844367
+          elif [ "$total" -eq 0 ]; then
+            ci="No CI runs found"; color=15844367
+          else
+            ci="Passed ($total checks)"; color=3066993
+          fi
+
+          jq -n --arg title "#$NUM $TITLE" --arg url "$URL" --argjson color "$color" \
+            --arg author "$AUTHOR" --arg merger "$MERGER" --arg ci "$ci" \
+            --arg size "+$ADDS / -$DELS in $FILES files" \
+            '{embeds: [{title: $title, url: $url, color: $color,
+              description: "Merged into main",
+              fields: [
+                {name: "Author", value: $author, inline: true},
+                {name: "Merged by", value: $merger, inline: true},
+                {name: "Size", value: $size, inline: true},
+                {name: "CI", value: $ci}
+              ]}]}' \
+          | curl -fsS -H "Content-Type: application/json" -d @- "$WEBHOOK"
