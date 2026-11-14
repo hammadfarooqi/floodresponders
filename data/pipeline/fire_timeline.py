@@ -36,8 +36,8 @@ ORIGIN = (-118.3510, 34.1128)        # Runyon Canyon, Sunset Fire start (8 Jan 2
 TARGET = (-118.3350, 34.0982)        # Sunset Blvd, middle of the Hollywood area: the front stops here
 WIND_TO_DEG = None                    # None = blow from the origin toward the target
 LB = 1.6                               # ellipse length-to-breadth ratio
-URBAN_FACTOR = 0.6                   # built-up cells burn at this share of the brush rate ...
-DENSITY_SLOWDOWN = 0.4                # ... and slower as building cover grows
+URBAN_FACTOR = 0.25                   # built-up cells burn at this share of the brush rate ...
+DENSITY_SLOWDOWN = 0.5                # ... and slower as building cover grows
 BRUSH_MAX_COVER = 0.05                # cells with < 5% building cover count as brush
 DURATION_MIN = 180                    # simulated fire length
 STEP_MIN = 3                          # one front polygon per step
@@ -80,6 +80,21 @@ def main():
         i, j = cell(b["lng"], b["lat"])
         if 0 <= i < nx and 0 <= j < ny:
             cover[i][j] += area / (CELL_M * CELL_M)
+
+    # Smooth building cover over a (2R+1)^2-cell window (~150 m): streets and yards between buildings are part
+    # of the built-up area, not brush. Without this, the fire runs through the gaps at brush speed.
+    R = 2
+    raw = cover
+    cover = [[0.0] * ny for _ in range(nx)]
+    for i in range(nx):
+        for j in range(ny):
+            tot = n = 0
+            for a in range(max(0, i - R), min(nx, i + R + 1)):
+                col = raw[a]
+                for b in range(max(0, j - R), min(ny, j + R + 1)):
+                    tot += col[b]
+                    n += 1
+            cover[i][j] = tot / n
 
     def fuel(i, j):
         c = min(cover[i][j], 1.0)
@@ -183,6 +198,10 @@ def main():
     for f in bm["features"]:
         f["properties"]["fa"] = fa.get(f["properties"]["id"])
     write_atomic(DEMO / "buildings_map.geojson", bm)
+    # Small list for the map: buildings the fire reaches, sorted by arrival time [[id, minutes], ...]
+    write_atomic(DEMO / "building_arrivals.json",
+                 sorted(([b["id"], b["fire_arrival_min"]] for b in buildings if b["fire_arrival_min"] is not None),
+                        key=lambda x: x[1]))
 
     people = sum(b["people_est"] for b in buildings if b["fire_arrival_min"] is not None)
     need = sum(b["people_need_help_est"] for b in buildings if b["fire_arrival_min"] is not None)

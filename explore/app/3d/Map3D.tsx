@@ -24,9 +24,9 @@ function style(base: keyof typeof BASES): StyleSpecification {
       dem: { type: "raster-dem", tiles: [TERRAIN], encoding: "terrarium", tileSize: 256, maxzoom: 15,
              attribution: "Terrain: Mapzen / AWS Open Data" },
       dem_shade: { type: "raster-dem", tiles: [TERRAIN], encoding: "terrarium", tileSize: 256, maxzoom: 15 },
-      buildings: { type: "geojson", data: "/api/demo/buildings_map.geojson" },
+      buildings: { type: "geojson", data: "/api/demo/buildings_map.geojson", promoteId: "id" },
       evac: { type: "geojson", data: "/api/demo/sunset_fire_2025_evacuation.geojson" },
-      fire: { type: "geojson", data: "/api/demo/fire_cells.geojson" },
+      fire: { type: "geojson", data: "/api/demo/fire_cells.geojson", generateId: true },
     },
     layers: [
       { id: "base", type: "raster", source: "base" },
@@ -38,10 +38,14 @@ function style(base: keyof typeof BASES): StyleSpecification {
       { id: "evac-line", type: "line", source: "evac",
         paint: { "line-color": ["case", ["==", ["slice", ["get", "name"], 0, 9], "Mandatory"], "#c2261d", "#eb6834"],
                  "line-width": 3, "line-dasharray": [2, 1.5] } },
-      { id: "fire", type: "fill", source: "fire", filter: ["<=", ["get", "t"], 0],
-        paint: { "fill-color": "#7a2a10", "fill-opacity": 0.75 } },
+      // Fire and burned buildings are driven by feature-state flags set once per cell/building as the clock
+      // passes them. Changing paint expressions every frame made MapLibre re-lay out 42k buildings and lag.
+      { id: "fire", type: "fill", source: "fire",
+        paint: { "fill-color": ["case", ["boolean", ["feature-state", "front"], false], "#ff7a1a", "#5b2310"],
+                 "fill-opacity": ["case", ["boolean", ["feature-state", "burned"], false], 0.8, 0] } },
       { id: "buildings", type: "fill-extrusion", source: "buildings",
-        paint: { "fill-extrusion-color": USE_COLORS as never, "fill-extrusion-height": ["get", "h"],
+        paint: { "fill-extrusion-color": ["case", ["boolean", ["feature-state", "burned"], false], "#3a2a22", USE_COLORS] as never,
+                 "fill-extrusion-height": ["get", "h"],
                  "fill-extrusion-base": 0, "fill-extrusion-opacity": 0.92 } },
       { id: "buildings-costar", type: "fill-extrusion", source: "buildings", filter: ["==", ["get", "costar"], 1],
         layout: { visibility: "none" },
@@ -77,15 +81,34 @@ export default function Map3D() {
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
-  // fire front and buildings reached, for the current time
+  // Fire data in time order: cells (index = generated feature id) and buildings reached.
+  const cells = useRef<{ id: number; t: number }[]>([]);
+  const arrivals = useRef<[string, number][]>([]);
+  const ptr = useRef({ burn: 0, cool: 0, bld: 0, t: -1 });
+  const FRONT_MIN = 10;
+  useEffect(() => {
+    fetch("/api/demo/fire_cells.geojson").then(r => r.json()).then(fc => {
+      cells.current = (fc.features as { properties: { t: number } }[]).map((f, id) => ({ id, t: f.properties.t }))
+        .sort((a, b) => a.t - b.t);
+    });
+    fetch("/api/demo/building_arrivals.json").then(r => r.json()).then(a => { arrivals.current = a; });
+  }, []);
+
+  // Apply the clock: only cells/buildings that changed since the last frame get a state update.
   useEffect(() => {
     const m = map.current;
-    if (!m || !m.getLayer("fire")) return;
-    m.setFilter("fire", ["<=", ["get", "t"], tMin]);
-    m.setPaintProperty("fire", "fill-color", ["case", [">=", ["get", "t"], tMin - 10], "#ff7a1a", "#5b2310"]);
-    m.setPaintProperty("fire", "fill-opacity", ["case", [">=", ["get", "t"], tMin - 10], 0.85, 0.7]);
-    m.setPaintProperty("buildings", "fill-extrusion-color",
-      ["case", ["all", ["!=", ["get", "fa"], null], ["<=", ["coalesce", ["get", "fa"], 9999], tMin]], "#3a2a22", USE_COLORS] as never);
+    if (!m || !m.getSource("fire") || !m.getSource("buildings")) return;
+    const p = ptr.current;
+    if (tMin < p.t) {  // went back in time (replay or slider): clear and re-apply
+      m.removeFeatureState({ source: "fire" });
+      m.removeFeatureState({ source: "buildings" });
+      Object.assign(p, { burn: 0, cool: 0, bld: 0 });
+    }
+    const c = cells.current, a = arrivals.current;
+    while (p.burn < c.length && c[p.burn].t <= tMin) { m.setFeatureState({ source: "fire", id: c[p.burn].id }, { burned: true, front: true }); p.burn++; }
+    while (p.cool < p.burn && c[p.cool].t <= tMin - FRONT_MIN) { m.setFeatureState({ source: "fire", id: c[p.cool].id }, { front: false }); p.cool++; }
+    while (p.bld < a.length && a[p.bld][1] <= tMin) { m.setFeatureState({ source: "buildings", id: a[p.bld][0] }, { burned: true }); p.bld++; }
+    p.t = tMin;
   }, [tMin]);
 
   useEffect(() => {
@@ -107,6 +130,7 @@ export default function Map3D() {
     m.on("mouseenter", "buildings", () => { m.getCanvas().style.cursor = "pointer"; });
     m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
     map.current = m;
+    (window as unknown as { __map?: maplibregl.Map }).__map = m;  // debugging handle (local prototype only)
     return () => { m.remove(); map.current = null; };
   }, []);
 
@@ -128,6 +152,8 @@ export default function Map3D() {
       const m = map.current!;
       m.setLayoutProperty("buildings-costar", "visibility", costar ? "visible" : "none");
       m.setTerrain(terrain ? { source: "dem", exaggeration: 1.4 } : null);
+      ptr.current = { burn: 0, cool: 0, bld: 0, t: -1 };
+      m.once("idle", () => setTMin(t => t + 1e-6));
     });
   };
   const fly = (v: keyof typeof VIEWS) => map.current?.flyTo({ ...VIEWS[v], duration: 2500, essential: true });
