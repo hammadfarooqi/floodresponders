@@ -43,6 +43,31 @@ To add a layer, add an entry in `export_layers.py` and run it.
 
 Static HTML maps (older): `cd data/processed && python3 -m http.server 8765`, then /coverage_map.html or /hollywood_map.html
 
+## Generate the plan v2 demo files (data/demo/, gitignored)
+
+Needs: root `.env` with the sponsor keys, the CoStar kit at `data/costar-kit/`, Python 3.9+ (and python3.12 for the
+two scripts that call OpenStreetMap, because of SSL). About 30-40 minutes the first time; API responses are cached.
+
+```
+python3 data/pipeline/costar_extract.py                  # CoStar -> processed/costar_{la,houston}.json
+python3 data/pipeline/enrich.py vexcel la                # Vexcel point lookups for CoStar buildings
+python3 data/pipeline/enrich.py matterport la            # Matterport stairs/windows
+python3 data/pipeline/enrich.py footprints la
+python3 data/pipeline/build_map.py                       # -> processed/buildings_la.json
+python3.12 data/pipeline/evac_zones.py                   # real Sunset Fire evacuation areas (OSM)
+python3 data/pipeline/area_fetch.py hollywood            # every Vexcel building in Hollywood (~15 min)
+python3 data/pipeline/assessor_join.py hollywood         # LA County Assessor per building (~5 min)
+python3 data/pipeline/build_hollywood_map.py             # -> processed/buildings_hollywood.json
+python3 data/pipeline/demo_buildings.py                  # -> demo/buildings.json (DemoBuilding + inputs)
+python3 data/pipeline/fire_timeline.py                   # -> demo/fire_timeline.json, fire_arrival_min, what-if evac areas
+python3.12 data/pipeline/roads_stations.py               # -> demo/roads.json, demo/stations.json
+```
+
+`buildings.json` fields beyond CONTRACTS.md DemoBuilding: `inputs` = the raw value from every source (Vexcel type,
+roof, vegetation; Assessor use, units, bedrooms, floor area, year built; story estimate and its source), so a scorer
+can switch sources on and off and fall back. Assessor values are per parcel and only on the parcel's main structure
+(`assessor_owner`).
+
 ## Files
 
 | Path | What it is |

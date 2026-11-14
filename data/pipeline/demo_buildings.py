@@ -85,11 +85,18 @@ def main():
         foot = s.get("footprint.area") or 0
 
         stories = (c or {}).get("stories")
+        stories_source = "costar" if stories else None
+        est_stories = None
+        if a.get("floor_area_sqft") and foot > 20 and s["id"] in owner_ids:
+            cap0 = 3 if foot < 80 else (6 if foot < 250 else 40)
+            est_stories = max(1, min(cap0, round(a["floor_area_sqft"] * SQFT_TO_M2 / foot)))
         if not stories and a.get("floor_area_sqft") and foot > 20 and s["id"] in owner_ids:
             est = a["floor_area_sqft"] * SQFT_TO_M2 / foot
             # Parcel floor area can belong to several buildings; a small footprint must not become a tower.
             cap = 3 if foot < 80 else (6 if foot < 250 else 40)
             stories = max(1, min(cap, round(est)))
+        if stories and not stories_source:
+            stories_source = "assessor_estimate"
         height = round(stories * STORY_M, 1) if stories else TYPE_HEIGHT_M.get(vx_type, 6.0)
 
         units = None
@@ -110,7 +117,22 @@ def main():
         b = {"id": s["id"], "lat": s["lat"], "lng": s["lng"], "footprint": ring, "height_m": height,
              "ground_elevation_m": s.get("ground-elevation.value"), "use": use, "units": units,
              "people_est": people, "people_need_help_est": need, "fire_arrival_min": None,
-             "costar": None, "matterport_ids": []}
+             "costar": None, "matterport_ids": [],
+             # Raw value from every source, so a scorer can switch sources on and off and fall back.
+             # Assessor values are per parcel; they are given only to the parcel's main structure (assessor_owner).
+             "inputs": {
+                 "vexcel": {"type": vx_type, "footprint_m2": round(foot),
+                            "roof_material": s.get("roof-characteristics.material.class"),
+                            "roof_condition": s.get("roof-characteristics.condition"),
+                            "tree_cover_zone1_pct": s.get("defensible-space.zone1-tree"),
+                            "tree_cover_zone2_pct": s.get("defensible-space.zone2-tree")},
+                 "assessor": ({"use_type": a.get("use_type"), "use_description": a.get("use_description"),
+                               "units": a.get("units"), "bedrooms": a.get("bedrooms"),
+                               "floor_area_sqft": a.get("floor_area_sqft"), "year_built": a.get("year_built"),
+                               "assessor_owner": s["id"] in owner_ids} if a else None),
+                 "stories_estimate": est_stories,       # Assessor floor area / Vexcel footprint (capped)
+                 "stories_used": stories, "stories_source": stories_source or "type_default",
+             }}
         if c:
             b["costar"] = {"id": c["id"], "name": c["name"], "address": c["address"], "stories": c.get("stories"),
                            "units": c.get("units"), "is_walkup": c.get("is_walkup"), "elevators": c.get("elevators"),
