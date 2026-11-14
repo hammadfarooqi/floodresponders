@@ -185,8 +185,13 @@ def main():
         osm_id = int(re.sub(r"\D", "", x["id"]))
         if num not in lafd or osm_id > int(re.sub(r"\D", "", lafd[num]["id"])):
             lafd[num] = x
-    others = [x for x in stations if x not in lafd.values()]
-    stations = sorted(lafd.values(), key=lambda x: x["number"])
+    # Trucks come from the city below the hills: the fire starts in the hills and runs south, so stations in
+    # the hills (Mulholland) or north of them (the Valley) are not used. Rule: south of the Hollywood Hills.
+    HILLS_SOUTH_EDGE_LAT = 34.115
+    for x in lafd.values():
+        x["excluded"] = "north of or in the Hollywood Hills" if x["lat"] > HILLS_SOUTH_EDGE_LAT else None
+    others = [x for x in stations if x not in lafd.values()] + [x for x in lafd.values() if x["excluded"]]
+    stations = sorted((x for x in lafd.values() if not x["excluded"]), key=lambda x: x["number"])
     print(f"LAFD stations used: {len(stations)}; other entries kept for reference: {len(others)}")
     for x in stations:
         print(f"   {x['name']:<18} {x['lat']:.4f}, {x['lng']:.4f}  snap {x['snap_m']} m")
