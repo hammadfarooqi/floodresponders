@@ -129,6 +129,17 @@ export default function Map3D() {
     });
     m.on("mouseenter", "buildings", () => { m.getCanvas().style.cursor = "pointer"; });
     m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
+    // LAFD stations (#46): HTML markers, so no glyph server is needed for labels
+    fetch("/api/demo/stations.json").then(r => r.json()).then((d: { stations: { name: string; number: number; lat: number; lng: number }[] }) => {
+      for (const st of d.stations) {
+        const el = document.createElement("div");
+        el.title = st.name;
+        el.textContent = String(st.number);
+        Object.assign(el.style, { background: "#c2261d", color: "#fff", font: "600 11px/1 -apple-system, sans-serif",
+          padding: "4px 5px", borderRadius: "4px", border: "2px solid #fff", boxShadow: "0 1px 4px #0006" });
+        new maplibregl.Marker({ element: el }).setLngLat([st.lng, st.lat]).setPopup(new maplibregl.Popup().setText(st.name)).addTo(m);
+      }
+    });
     map.current = m;
     (window as unknown as { __map?: maplibregl.Map }).__map = m;  // debugging handle (local prototype only)
     return () => { m.remove(); map.current = null; };
