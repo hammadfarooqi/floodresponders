@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+# coord: coordination tool for agents working in parallel on this repo.
+# Protocol: see AGENTS.md. Needs git, gh, date. Uses flock when installed,
+# and a lock directory when it is not (macOS has no flock by default).
+set -euo pipefail
+
+ROOT=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+COORD="$ROOT/.coord"
+LOCK="$COORD/.lock"
+STALE_MIN=45
+TYPES="JOIN CLAIM START PROGRESS DONE BLOCKED NEED INTERFACE DECISION RELEASE NOTE"
+LAST_EVENT=""
+
+die() { echo "coord: $*" >&2; exit 1; }
+cgit() { git -C "$COORD" "$@"; }
+
+# Only one process per machine may change the shared .coord checkout at a time.
+lock() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK"
+    flock 9
+  else
+    local waited=0
+    until mkdir "$LOCK.d" 2>/dev/null; do
+      sleep 0.2
+      waited=$((waited + 1))
+      # A lock held for more than 2 minutes belongs to a dead process.
+      if [ "$waited" -gt 600 ]; then rmdir "$LOCK.d" 2>/dev/null || true; waited=0; fi
+    done
+    trap 'rmdir "$LOCK.d" 2>/dev/null || true' EXIT
+  fi
+}
+
+unlock() {
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>&-
+  else
+    rmdir "$LOCK.d" 2>/dev/null || true
+    trap - EXIT
+  fi
+}
+
+cmd_init() {
+  if [ ! -e "$COORD/.git" ]; then
+    git fetch -q origin coord
+    git worktree add -q "$COORD" coord
+    echo "coord: created shared log checkout at $COORD"
+  fi
+}
+
+# Pull the newest events. A failed pull (offline) is not fatal for read commands.
+sync() {
+  cmd_init
+  lock
+  cgit pull -q --rebase origin coord || echo "coord: pull failed, showing local copy" >&2
+  unlock
+}
+
+# Print one tab-separated line per event file given on stdin:
+# file, ts, agent, type, issue, files, first body line.
+parse() {
+  (cd "$COORD/events" && xargs awk '
+    function out() { if (f != "") printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", f, ts, agent, type, issue, files, body }
+    FNR == 1 { out(); f = FILENAME; fm = 0; ts = agent = type = issue = files = body = "" }
+    /^---[ \t]*$/ { fm++; next }
+    fm == 1 {
+      i = index($0, ":"); k = substr($0, 1, i - 1); v = substr($0, i + 1)
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v)
+      if (k == "ts") ts = v; else if (k == "agent") agent = v; else if (k == "type") type = v
+      else if (k == "issue") issue = v; else if (k == "files") files = v
+      next
+    }
+    fm >= 2 && body == "" && NF { body = $0 }
+    END { out() }
+  ')
+}
+
+all_events() { ls "$COORD/events" | grep '\.md$' | sort; }
+
+show() {
+  awk -F'\t' '{
+    line = $2 " " $3 " " $4
+    if ($5 != "") line = line " #" $5
+    if ($6 != "") line = line " " $6
+    print line ": " $7
+  }'
+}
+
+cmd_post() {
+  [ -n "${AGENT_NAME:-}" ] || die "AGENT_NAME is not set. Run: export AGENT_NAME=<your agent name>"
+  [ $# -ge 1 ] || die "usage: coord post <TYPE> [--issue N] [--files a,b] \"<message>\""
+  local type=$1 issue="" files="" msg=""
+  shift
+  case " $TYPES " in *" $type "*) ;; *) die "unknown type '$type'. Use one of: $TYPES" ;; esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --issue) issue=${2#\#}; shift 2 ;;
+      --files) files=$2; shift 2 ;;
+      *) msg=$1; shift ;;
+    esac
+  done
+  [ -n "$msg" ] || die "the message is empty"
+
+  cmd_init
+  lock
+  local now ts fts hex file
+  mkdir -p "$COORD/events"
+  # File names sort by time. Two events from one agent in the same second
+  # would sort at random, so wait for the next second.
+  while :; do
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    fts=$(echo "$now" | tr -d ':-')
+    ls "$COORD/events/${fts}_${AGENT_NAME}_"* >/dev/null 2>&1 || break
+    sleep 1
+  done
+  ts=$now
+  hex=$(openssl rand -hex 2 2>/dev/null || od -An -N2 -tx1 /dev/urandom | tr -d ' \n')
+  file="events/${fts}_${AGENT_NAME}_${hex}.md"
+  {
+    echo "---"
+    echo "ts: $ts"
+    echo "agent: $AGENT_NAME"
+    echo "type: $type"
+    [ -z "$issue" ] || echo "issue: $issue"
+    [ -z "$files" ] || echo "files: [$(echo "$files" | sed 's/,/, /g')]"
+    echo "---"
+    echo "$msg"
+  } > "$COORD/$file"
+  cgit add "$file"
+  cgit commit -q -m "$type $AGENT_NAME${issue:+ #$issue}"
+
+  local try pushed=0
+  for try in 1 2 3 4 5 6 7 8; do
+    if cgit pull -q --rebase origin coord 2>/dev/null && cgit push -q origin HEAD:coord 2>/dev/null; then
+      pushed=1
+      break
+    fi
+    sleep "$((RANDOM % 3 + 1))"
+  done
+  unlock
+  LAST_EVENT=$(basename "$file")
+  [ "$pushed" = 1 ] || die "event saved locally but not pushed after 8 tries: $file. The next post will retry it."
+  echo "posted $type $file"
+}
+
+cmd_tail() {
+  local n=${1:-40}
+  sync
+  all_events | tail -n "$n" | parse | show
+}
+
+cmd_since() {
+  [ $# -eq 1 ] || die "usage: coord since <ts>   (example: 2026-11-14T15:40:12Z)"
+  local from
+  from=$(echo "$1" | tr -d ':-')
+  sync
+  all_events | awk -v from="$from" 'substr($0, 1, length(from)) > from' | parse | show
+  echo "# now $(date -u +%Y-%m-%dT%H:%M:%SZ)  (use this as <ts> next time)"
+}
+
+cmd_active() {
+  sync
+  all_events | parse | awk -F'\t' -v now="$(date -u +%s)" -v stale="$STALE_MIN" '
+    function epoch(t,   y, m, d, a) {
+      y = substr(t, 1, 4) + 0; m = substr(t, 6, 2) + 0; d = substr(t, 9, 2) + 0
+      if (m <= 2) { y--; m += 12 }
+      a = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * (m - 3) + 2) / 5) + d - 719469
+      return a * 86400 + substr(t, 12, 2) * 3600 + substr(t, 15, 2) * 60 + substr(t, 18, 2)
+    }
+    { last[$3] = $2 }
+    $5 != "" && ($4 == "CLAIM" || $4 == "START") {
+      k = $3 SUBSEP $5
+      if (!(k in open)) order[++n] = k
+      open[k] = 1
+      if ($6 != "") fl[k] = $6
+    }
+    $5 != "" && $4 == "RELEASE" { delete open[$3 SUBSEP $5] }
+    $5 != "" && $4 == "DONE" { for (k in open) { split(k, p, SUBSEP); if (p[2] == $5) delete open[k] } }
+    END {
+      for (i = 1; i <= n; i++) {
+        k = order[i]
+        if (!(k in open) || seen[k]++) continue
+        split(k, p, SUBSEP)
+        mins = int((now - epoch(last[p[1]])) / 60)
+        printf "%s #%s %s %dm ago%s\n", p[1], p[2], (k in fl ? fl[k] : "[no files listed]"), mins, (mins > stale ? "  STALE" : "")
+        shown++
+      }
+      if (!shown) print "no active claims"
+    }'
+}
+
+cmd_claim() {
+  [ $# -eq 1 ] || die "usage: coord claim <issue#>"
+  [ -n "${AGENT_NAME:-}" ] || die "AGENT_NAME is not set"
+  local n=${1#\#}
+  gh issue edit "$n" --add-assignee @me --add-label status:claimed --remove-label status:ready >/dev/null
+  gh issue comment "$n" --body "claimed by $AGENT_NAME" >/dev/null
+  cmd_post CLAIM --issue "$n" "claiming #$n"
+  sync
+  # The earliest open CLAIM for this issue wins. File names sort by time.
+  local winner
+  winner=$(all_events | parse | awk -F'\t' -v n="$n" '
+    $5 != n { next }
+    $4 == "CLAIM" && !($3 in first) { first[$3] = $1 }
+    $4 == "RELEASE" { delete first[$3] }
+    $4 == "DONE" { for (a in first) delete first[a] }
+    END { for (a in first) if (best == "" || first[a] < best) { best = first[a]; who = a } print who }')
+  if [ "$winner" = "$AGENT_NAME" ]; then
+    echo "WON #$n"
+  else
+    echo "LOST #$n to $winner. Run: coord post RELEASE --issue $n \"lost claim race to $winner\""
+    return 1
+  fi
+}
+
+cmd_done() {
+  [ $# -eq 2 ] || die "usage: coord done <issue#> \"<message>\""
+  local n=${1#\#}
+  cmd_post DONE --issue "$n" "$2"
+  gh issue edit "$n" --add-label status:done --remove-label status:claimed >/dev/null
+}
+
+cmd_board() {
+  gh issue list --state open --limit 200 --json number,title,labels --jq '
+    .[] | [.labels[].name] as $l
+    | [ (($l | map(select(startswith("status:"))) | first) // "no status"),
+        (($l | map(select(startswith("priority:"))) | first) // "priority:p9" | ltrimstr("priority:")),
+        (.number | tostring),
+        ($l | map(select(startswith("area:") or . == "human-decision")) | join(" ")),
+        .title ] | @tsv' |
+    awk -F'\t' '{
+      o = 9
+      if ($1 == "status:ready") o = 1; else if ($1 == "status:claimed") o = 2
+      else if ($1 == "status:blocked") o = 3; else if ($1 == "status:done") o = 4
+      printf "%d\t%s\t%s\t%06d\t%s\t%s\n", o, $1, $2, $3, $4, $5
+    }' | sort |
+    awk -F'\t' '{
+      if ($2 != prev) { print "== " $2 " =="; prev = $2 }
+      printf "  #%d [%s] %s  %s\n", $4, $3, $6, $5
+    }'
+}
+
+cmd_new_agent() {
+  [ $# -eq 1 ] || die "usage: coord new-agent <agent-name>"
+  local name=$1 dir
+  dir="$(dirname "$ROOT")/$(basename "$ROOT")-$name"
+  git fetch -q origin main
+  git worktree add -q "$dir" -b "agent/$name/base" origin/main
+  cmd_init
+  echo "Worktree ready. Run these two lines, then start your agent there:"
+  echo "  cd $dir"
+  echo "  export AGENT_NAME=$name"
+}
+
+cmd=${1:-help}
+[ $# -eq 0 ] || shift
+case "$cmd" in
+  init) cmd_init ;;
+  new-agent) cmd_new_agent "$@" ;;
+  post) cmd_post "$@" ;;
+  tail) cmd_tail "$@" ;;
+  since) cmd_since "$@" ;;
+  active) cmd_active ;;
+  claim) cmd_claim "$@" ;;
+  done) cmd_done "$@" ;;
+  board) cmd_board ;;
+  *)
+    cat <<'EOF'
+usage: coord <command>
+  init                          create the shared .coord log checkout (safe to repeat)
+  new-agent <name>              make a worktree for one more agent on this machine
+  post <TYPE> [--issue N] [--files a,b] "<message>"
+  tail [N]                      last N events (default 40)
+  since <ts>                    events after a UTC timestamp
+  active                        open claims, with STALE flags
+  claim <issue#>                claim an issue, prints WON or LOST
+  done <issue#> "<message>"     post DONE and label the issue status:done
+  board                         open issues grouped by status
+EOF
+    ;;
+esac
