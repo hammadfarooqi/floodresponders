@@ -2,27 +2,50 @@
 
 This file is the single source for anything two work areas share: API shapes, data models, env vars, ports.
 To change it, update this file in the same PR and post an `INTERFACE` event that names who is affected.
-Everything here is a first draft from the project description. `TBD` means nobody has decided yet.
+Plan v2 (fire evacuation demo, Hollywood) replaced the first draft on 2026-11-14. `TBD` means nobody has decided yet.
 
-## Product summary
+## Product summary (plan v2, 2026-11-14, decided by Hammad)
 
-Roll Call helps responders during fires and floods.
+Roll Call is an AI dispatcher for a wildfire evacuation. It scores buildings by **people who need help to get out**
+and how soon the fire reaches them, matches fire trucks to buildings, and keeps that matching up to date in real time.
 
-1. **Risk score** for each building: exposure x difficulty of evacuation x how soon the hazard arrives.
-2. **Priority queue:** at-risk buildings go to nearby responder units in priority order, one responder per building.
-3. **AI calling agent:** calls the building manager, says which responder it acts for, asks who needs help
-   to evacuate, and moves the building up the queue based on the answer.
-4. **Unit directions:** once a unit is flagged, show the nearest usable stairwell or a window a ladder can reach.
+1. **Score** each building: estimated people who need help x urgency (minutes until the fire arrives).
+2. **Match** fire trucks to buildings (most at-risk buildings get nearby trucks). Re-match every few simulated minutes.
+3. **Deep agent** runs the response: it takes calls from truck drivers ("I can't go there, I'm busy") and from
+   building supervisors ("a tenant is stuck"), re-matches on its own, then calls everyone affected with the change.
+4. **On arrival:** show the responder the building (Matterport stairs and windows, where we have them).
 
-**Demo:** the user picks a disaster type (fire or flood), a point of origin (N, NE, E, SE, S, SW, W, NW), and
-a severity from 1 to 5. Then they click a building in a sample city of made-up buildings and have the agent
-call its manager.
+**Scope:** fire only, Los Angeles only (Hollywood). No floods, no Houston, no disaster, origin or severity controls.
+
+## Demo (plan v2)
+
+One fixed fire: the real **Sunset Fire** (8 Jan 2025, Runyon Canyon origin) with **stronger wind** blowing toward
+Hollywood. The fire front reaches the middle of the Hollywood area (about Sunset Blvd) and stops there.
+
+- **3D map** of Hollywood with hills, every real building (Vexcel outlines) extruded, camera moves per demo step.
+- **Fire:** an animated orange area that grows over about 3 simulated hours; the demo run plays it in under 30 seconds
+  (play, pause, speed).
+- **Buildings:** all buildings in the area take part. A toggle (bottom left) highlights buildings with CoStar data.
+  Only CoStar buildings have a manager phone, so only they can be called.
+- **People:** dots (about 1 dot = 10 people). Green = can leave alone; a second color = needs help (seniors,
+  wheelchair users), slower. People leave slowly on their own, much faster once a truck arrives, and walk away from
+  the fire. People still inside when the fire reaches the building turn red. A counter shows evacuated / trapped.
+- **Trucks:** 8-12 fire trucks start at real LAFD stations, drive on real streets (no traffic rules), with a dashed
+  line to their assigned building. The line moves when the agent re-matches.
+- **Agent moments:** a driver declines an assignment; a supervisor reports a stuck tenant. The agent re-matches and
+  notifies. Transcript shown on screen.
+- **Two runs:** (1) our matching, risk-aware, re-matches after calls; (2) comparison: each truck goes to the nearest
+  building that needs help and never re-plans. Same fire, same people, same trucks.
+- **Stretch:** run both policies about 50 times with varied wind, start points and leaving rates; show the spread.
+
+Honesty rules for the demo: numbers come from a simulation with labeled assumptions; do not claim measured lives
+saved; do not present "who was trapped" statistics that only follow from our own assumptions.
 
 ## Stack
 
 | Part | Choice |
 |---|---|
-| `web/` | Next.js + TypeScript. Map library: TBD |
+| `web/` | Next.js + TypeScript. Map: MapLibre GL JS + deck.gl, with free terrain tiles (no account needed). This replaces CesiumJS from #33 if the prototype holds up (see the map issue) |
 | `api/` | Python, FastAPI, Pydantic models, pytest, ruff |
 | `agent/` | Python, LangChain Deep Agents (`deepagents` package). LLM provider: TBD |
 | Voice or phone for the call | TBD (human decision) |
@@ -35,92 +58,96 @@ Sponsor data comes from CoStar Group (CoStar, Vexcel, Matterport). We have acces
 2026-11-14): Matterport and Vexcel by API, CoStar as a local data kit. They cover Houston and Los Angeles only.
 The exploration work (probes, pipeline, maps) lives on branch `hammad_1` (`data/README.md` there). Decisions are in the coord log.
 
-| Source | Fields it gives |
-|---|---|
-| Vexcel | elevation, roof condition, building footprint, height |
-| CoStar | property type (including senior housing), units, tenants, floors, elevators, construction type, manager contact |
-| Matterport | stairwells, exits, fire escapes, street-facing windows a ladder can reach |
-| Public feeds | FEMA flood zones, NASA FIRMS fire detections, responder vehicle locations |
-| Phone call | unit-level needs, collected live. Used for the incident, then deleted |
+| Source | Fields it gives | Coverage in Hollywood (42,557 buildings) |
+|---|---|---|
+| Vexcel | building outline, ground elevation, building type, roof | ~100% |
+| LA County Assessor (public) | use, units, bedrooms, floor area, year built | 92-99% |
+| CoStar | stories, units, walk-up, elevators, senior housing, construction material, **manager contact** | 0.7% (275 buildings) |
+| Matterport | stairs, windows, doors inside the building | <1% |
+| OpenStreetMap (public) | streets for truck routes, evacuation area edges | 100% |
+| LAFD stations (public) | truck start points | - |
+| Phone calls (agent) | who needs help, driver availability | live |
 
-## Data models (draft)
+**This repo is public.** Never commit files that contain CoStar, Vexcel or Matterport data, or files made from them.
+Demo data is generated on each machine by the pipeline (needs the keys and the CoStar kit), or loaded from Supabase.
 
-JSON field names are `snake_case` in the API and in `data/` files.
+## Data models (plan v2, draft)
+
+JSON field names are `snake_case`. Demo data files live in `data/demo/` (gitignored, generated).
 
 ```
-Building {
+DemoBuilding {                       # data/demo/buildings.json
   id: string
-  name: string
-  address: string
   lat: number, lng: number
-  footprint: [[lng, lat], ...]        # polygon ring            (Vexcel)
-  height_m: number                     #                         (Vexcel)
-  elevation_m: number                  #                         (Vexcel)
-  roof_condition: "good" | "fair" | "poor"                      (Vexcel)
-  property_type: "residential" | "senior_housing" | "commercial" | "mixed"   (CoStar)
-  units: int, tenants: int, floors: int, elevators: int         (CoStar)
-  construction_type: string            # value set TBD           (CoStar)
-  manager: { name: string, phone: string }                      (CoStar)
-  egress: {                            #                         (Matterport)
-    stairwells: int, exits: int, fire_escapes: int,
-    ladder_windows: int                # street-facing windows a ladder can reach
+  footprint: [[lng, lat], ...]
+  height_m: number                   # CoStar stories x 3.2, else Assessor floor area / footprint, else type default
+  ground_elevation_m: number         # Vexcel
+  use: "residential" | "commercial" | "other" | "none"   # "none" = shed, garage: no people
+  units: int | null                  # CoStar, else Assessor
+  people_est: int                    # units x household_size x (1 - vacancy)
+  people_need_help_est: int          # people_est x need_rate
+  fire_arrival_min: number | null    # from the fire timeline; null = fire never arrives
+  costar: null | {                   # only for CoStar buildings
+    id: string, name: string, address: string, stories: int | null, units: int | null,
+    is_walkup: bool | null, elevators: int | null, is_senior: bool,
+    manager: { company: string | null, phone: string | null }
   }
+  matterport_ids: [string]
 }
 
-Scenario {
-  disaster_type: "fire" | "flood"
-  origin: "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW"
-  severity: 1..5
+FireTimeline {                       # data/demo/fire_timeline.json
+  origin: [lng, lat]
+  wind_from_deg: number
+  step_min: number                   # e.g. 2
+  fronts: [GeoJSON Polygon]          # burned area at each step
 }
 
-RiskScore {
-  building_id: string
-  exposure: number           # 0..1
-  evac_difficulty: number    # 0..1
-  eta_minutes: number        # time until the hazard arrives
-  score: number              # exposure x evac_difficulty x urgency(eta). Exact formula TBD
-}
+Station { id: string, name: string, lat: number, lng: number }      # data/demo/stations.json (public)
+RoadGraph { nodes: [[lng, lat]], edges: [[from, to, meters]] }      # data/demo/roads.json (public, OSM)
 
-Responder {
-  id: string
-  kind: "fire" | "police" | "ambulance"
+Truck {
+  id: string, station_id: string
   lat: number, lng: number
+  status: "idle" | "en_route" | "on_scene" | "unavailable"
+  building_id: string | null
 }
 
-QueueEntry {
-  rank: int                  # 1 is most urgent
-  building_id: string
-  risk: RiskScore
-  responder_id: string | null    # one responder per building
-  call_boost: number             # change from the manager call, 0 if no call yet
+Assignment { truck_id: string, building_id: string, eta_min: number, reason: string }
+
+SimConfig {                          # all assumptions in one place, shown in the UI
+  household_size: 2.4, default_vacancy: 0.05, need_rate: 0.10,
+  self_evac_rate_per_min: number, assisted_evac_rate_per_min: number,
+  rematch_every_min: 5, truck_speed_kmh: 40, seed: int
 }
 
-Call {
-  id: string
-  building_id: string
-  status: "queued" | "in_progress" | "completed" | "failed"
-  transcript: [{ speaker: "agent" | "manager", text: string }]
-  residents_needing_help: [{ unit: string, need: string }]
-}
+AgentEvent =
+  | { type: "driver_declines", truck_id, building_id, reason }
+  | { type: "tenant_stuck", building_id, count, note }
+AgentAction =
+  | { type: "rematch", assignments: [Assignment] }
+  | { type: "notify", to: "truck" | "supervisor", id: string, message: string }
 ```
 
-Call data holds personal information. Keep it in memory only and delete it when the scenario is reset.
+Matching: `match(state, policy) -> [Assignment]`, with `policy` = `"ours"` (risk-aware: people_need_help x urgency,
+nearby trucks first, re-match allowed) or `"nearest"` (comparison: nearest building that needs help, no re-plan).
+Both are pure functions over the same state, so the two runs are fair.
 
-## API (draft)
+Call data holds personal information. Keep it in memory only and delete it when the simulation is reset.
 
-Base path `/api`. JSON in and out. The web app reads the base URL from `NEXT_PUBLIC_API_URL`.
+## API (plan v2, draft)
+
+Base path `/api`. JSON in and out. The web app reads the base URL from `NEXT_PUBLIC_API_URL`. The simulation runs
+in the browser; the API serves data and runs matching and the agent.
 
 | Method and path | Request | Response |
 |---|---|---|
 | `GET /api/health` | | `{ "status": "ok" }` |
-| `GET /api/buildings` | | `{ "buildings": [Building] }` |
-| `GET /api/buildings/{id}` | | `Building` |
-| `GET /api/responders` | | `{ "responders": [Responder] }` |
-| `POST /api/scenario` | `Scenario` | `{ "scenario": Scenario, "queue": [QueueEntry] }`. Replaces the current scenario and deletes call data |
-| `GET /api/queue` | | `{ "scenario": Scenario or null, "queue": [QueueEntry] }` |
-| `POST /api/buildings/{id}/call` | | `Call` (starts a manager call) |
-| `GET /api/calls/{id}` | | `Call` (poll for status and transcript) |
-| `GET /api/buildings/{id}/directions?unit=` | | TBD |
+| `GET /api/demo/buildings` | | `{ "buildings": [DemoBuilding] }` |
+| `GET /api/demo/fire` | | `FireTimeline` |
+| `GET /api/demo/stations` | | `{ "stations": [Station] }` |
+| `GET /api/demo/roads` | | `RoadGraph` |
+| `POST /api/match` | `{ state, policy }` | `{ "assignments": [Assignment] }` |
+| `POST /api/agent/event` | `{ state, event: AgentEvent }` | `{ "actions": [AgentAction], "transcript": [...] }` |
 
 Errors: HTTP status plus `{ "detail": string }` (the FastAPI default).
 
@@ -129,8 +156,9 @@ Errors: HTTP status plus `{ "detail": string }` (the FastAPI default).
 `agent/` is a Python package named `rollcall_agent`. The API installs it with `pip install -e ../agent`.
 
 ```
-run_manager_call(building: dict, responder: dict, scenario: dict) -> dict
-# returns { "transcript": [...], "residents_needing_help": [...] } in the Call shapes above
+handle_event(state: dict, event: dict) -> dict
+# returns { "actions": [AgentAction], "transcript": [...] }. Tools: match(), notify_truck(), notify_supervisor(),
+# bump_building(). run_manager_call() from #17 becomes the supervisor-call tool.
 ```
 
 How the manager side of the call is produced (real phone call, voice in the browser, or simulated text) is TBD.
@@ -160,6 +188,6 @@ with names only.
 web/      Next.js app
 api/      FastAPI app, package `app`, tests in api/tests, deps in api/requirements.txt
 agent/    package `rollcall_agent`, tests in agent/tests, deps in agent/requirements.txt
-data/     buildings.json, responders.json, scripts that make or import them
+data/     pipeline scripts (branch hammad_1 for now); data/demo/ = generated demo files, gitignored
 tools/    coord, coord_smoke.sh
 ```

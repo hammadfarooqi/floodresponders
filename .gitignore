@@ -13,3 +13,6 @@ __pycache__/
 data/costar-kit/
 data/processed/
 data/cache/
+
+# Demo files made from sponsor data. Generated per machine, never committed (public repo).
+data/demo/
