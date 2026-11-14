@@ -1,4 +1,4 @@
-# data/: sponsor data pipeline
+# data/: sponsor data pipeline (branch hammad_1 only, not main)
 
 This folder turns the CoStar, Vexcel and Matterport data into one record per building, and draws a coverage map.
 
@@ -36,7 +36,12 @@ Vexcel area queries return each parcel once per image collection (each year flow
 Use `houston` in place of `la` for Houston. API responses are cached in `data/cache/`, so a re-run only calls the API
 for new ids. A full run for one city takes about 15 minutes.
 
-Open the map: `cd data/processed && python3 -m http.server 8765`, then http://127.0.0.1:8765/coverage_map.html
+**Live map (preferred):** `cd explore && npm install && npm run dev`, then http://localhost:3001. It shows every layer in
+`data/processed/layers/manifest.json` and reloads a layer by itself when its file changes. `build_map.py` and
+`build_hollywood_map.py` call `export_layers.py` at the end, so the open page updates after each pipeline run.
+To add a layer, add an entry in `export_layers.py` and run it.
+
+Static HTML maps (older): `cd data/processed && python3 -m http.server 8765`, then /coverage_map.html or /hollywood_map.html
 
 ## Files
 

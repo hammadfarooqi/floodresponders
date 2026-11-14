@@ -104,3 +104,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Push the new data to the live explorer (explore/), which reloads changed layers by itself.
+    import subprocess
+    subprocess.run([sys.executable, str(Path(__file__).with_name("export_layers.py"))], check=False)
