@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollywood Building Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root {
+    --surface: #fcfcfb; --ink: #1d1d1b; --ink-2: #5c5b57; --muted: #8a8984; --line: #e4e3df;
+    --t1: #e87ba4; --t2: #eda100; --t3: #2a78d6; --t4: #008300;
+    --vx: #b9b7b1; --vx-line: #8a8984; --order: #c2261d; --warn: #eb6834;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--surface); color: var(--ink);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #app { display: grid; grid-template-columns: 340px 1fr; height: 100%; }
+  #side { overflow-y: auto; padding: 16px; border-right: 1px solid var(--line); }
+  #map { height: 100%; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--ink-2); margin: 0 0 12px; font-size: 13px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
+  label.chk { display: flex; gap: 8px; align-items: center; padding: 4px; cursor: pointer; }
+  .sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; flex: none; }
+  .zone-sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; border: 2px dashed; flex: none; }
+  .count { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { font-weight: 500; color: var(--muted); font-size: 11px; text-align: right; padding: 0 0 4px 4px; }
+  th:first-child, td:first-child { text-align: left; padding-left: 0; }
+  td { padding: 3px 0 3px 4px; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 6px 0; }
+  .seg button { flex: 1; border: 0; padding: 7px; background: transparent; cursor: pointer; font: inherit; font-size: 13px; color: var(--ink-2); }
+  .seg button.on { background: var(--ink); color: var(--surface); }
+  .pop h3 { margin: 0 0 2px; font-size: 14px; }
+  .pop .addr { color: var(--ink-2); font-size: 12px; margin-bottom: 6px; }
+  .pop table td { border: 0; padding: 1px 6px 1px 0; text-align: left; font-size: 12px; }
+  .pop .k { color: var(--muted); }
+  .pop .src { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 6px 0 2px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+  @media (max-width: 760px) { #app { grid-template-columns: 1fr; grid-template-rows: 45% 55%; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1>Hollywood: every building</h1>
+    <p class="sub">All Vexcel building outlines in the Hollywood plan area and the Sunset Fire (Jan 2025) evacuation areas. Click a building for its data.</p>
+
+    <h2>Buildings (click to hide)</h2>
+    <div id="legend"></div>
+
+    <h2>Sunset Fire evacuation, 8 Jan 2025</h2>
+    <label class="chk"><input type="checkbox" id="zOrder" checked><span class="zone-sw" style="border-color:var(--order);background:#c2261d1a"></span> Mandatory order (LAFD)</label>
+    <label class="chk"><input type="checkbox" id="zWarn" checked><span class="zone-sw" style="border-color:var(--warn);background:#eb68341a"></span> Warning (east and north edges assumed)</label>
+    <label class="chk"><input type="checkbox" id="zPlan" checked><span class="zone-sw" style="border-color:#1d1d1b;border-style:solid"></span> Hollywood plan area</label>
+    <div class="seg" id="scope"><button data-s="all" class="on">All buildings</button><button data-s="warning">In evacuation areas</button><button data-s="order">Order only</button></div>
+
+    <h2>What is in each area</h2>
+    <table id="stats"></table>
+
+    <p class="note">Gray = Vexcel only: outline, ground elevation, roof. Colored = a CoStar building is on that parcel; color is its data tier (green = complete). One CoStar property can cover several outlines. Sponsor data: local use only.</p>
+  </aside>
+  <div id="map"></div>
+</div>
+<script>
+const D = /*__DATA__*/null;
+const css = getComputedStyle(document.documentElement);
+const v = n => css.getPropertyValue(n).trim();
+const TIER = {1: v("--t1"), 2: v("--t2"), 3: v("--t3"), 4: v("--t4")};
+const CATS = [
+  {k: "vx", label: "Vexcel only (no CoStar)", color: v("--vx")},
+  {k: 4, label: "CoStar tier 4: complete", color: TIER[4]},
+  {k: 3, label: "CoStar tier 3: no stairs/windows", color: TIER[3]},
+  {k: 2, label: "CoStar tier 2: partial CoStar", color: TIER[2]},
+  {k: 1, label: "CoStar tier 1: CoStar only", color: TIER[1]},
+];
+const state = {hidden: new Set(), scope: "all"};
+const S = D.structures.map(([id, rings, cid, zone, btype, roof, cond, elev, area]) =>
+  ({id, rings, cid, zone, btype, roof, cond, elev, area, cat: cid && D.costar[cid] ? D.costar[cid].tier : "vx"}));
+
+const map = L.map("map", {preferCanvas: true});
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+  attribution: "Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors", maxNativeZoom: 16, maxZoom: 19}).addTo(map);
+L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {maxNativeZoom: 16, maxZoom: 19}).addTo(map);
+map.createPane("zones"); map.getPane("zones").style.zIndex = 450; map.getPane("zones").style.pointerEvents = "none";
+const zr = L.svg({pane: "zones"});
+const zoneLayers = {
+  zPlan: L.geoJSON(D.plan, {pane: "zones", renderer: zr, interactive: false, style: {color: "#1d1d1b", weight: 2, fill: false}}),
+  zWarn: L.geoJSON({type: "FeatureCollection", features: D.zones.features.filter(f => f.properties.name.startsWith("Evacuation warning"))},
+    {pane: "zones", renderer: zr, interactive: false, style: {color: v("--warn"), weight: 3, dashArray: "8 6", fillColor: v("--warn"), fillOpacity: 0.05}}),
+  zOrder: L.geoJSON({type: "FeatureCollection", features: D.zones.features.filter(f => f.properties.name.startsWith("Mandatory"))},
+    {pane: "zones", renderer: zr, interactive: false, style: {color: v("--order"), weight: 3.5, dashArray: "8 6", fillColor: v("--order"), fillOpacity: 0.08}}),
+};
+for (const [id, l] of Object.entries(zoneLayers)) {
+  const cb = document.getElementById(id);
+  const sync = () => cb.checked ? l.addTo(map) : map.removeLayer(l);
+  cb.onchange = sync; sync();
+}
+
+const fmt = x => (x === null || x === undefined || x === "") ? '<span class="k">—</span>' : x;
+function popup(s) {
+  const rows = [["Building type", fmt(s.btype)], ["Footprint", s.area ? s.area.toLocaleString() + " m²" : fmt(null)],
+    ["Ground elev.", s.elev == null ? fmt(null) : s.elev.toFixed(1) + " m"], ["Roof", `${fmt(s.roof)}${s.cond ? " · condition " + s.cond + "/5" : ""}`],
+    ["Evacuation", s.zone === "order" ? "inside mandatory order" : s.zone === "warning" ? "inside warning area" : "outside"]];
+  let html = `<div class="pop"><div class="src">Vexcel</div><table>${rows.map(([k, x]) => `<tr><td class="k">${k}</td><td>${x}</td></tr>`).join("")}</table>`;
+  const c = s.cid && D.costar[s.cid];
+  if (c) {
+    const cr = [["Tier", `${c.tier}: ${D.tiers[c.tier]}`], ["Type", `${fmt(c.property_type)}${c.apartment_style ? " · " + c.apartment_style : ""}`],
+      ["Stories", fmt(c.stories)], ["Material", fmt(c.construction_material)], ["Year built", fmt(c.year_built)], ["Units", fmt(c.units)],
+      ["Walk-up", c.is_walkup == null ? fmt(null) : (c.is_walkup ? "yes" : "no")], ["Senior", c.is_senior ? "yes" : "no"],
+      ["Matterport", `${c.n_scans || 0} scans · ${c.mp_staircases || 0} stairs · ${c.mp_windows || 0} windows`],
+      ["Manager", c.manager ? `${fmt(c.manager.company)} · ${fmt(c.manager.phone)}` : fmt(null)],
+      ["Outlines", `${c.n_structures} on this parcel`]];
+    html += `<div class="src">CoStar</div><h3>${c.name}</h3><div class="addr">${c.address} · CoStar ${c.id}</div>
+      <table>${cr.map(([k, x]) => `<tr><td class="k">${k}</td><td>${x}</td></tr>`).join("")}</table>`;
+  }
+  return html + "</div>";
+}
+
+const layer = L.layerGroup().addTo(map);
+function inScope(s) {
+  if (state.scope === "order") return s.zone === "order";
+  if (state.scope === "warning") return s.zone === "order" || s.zone === "warning";
+  return true;
+}
+function render() {
+  layer.clearLayers();
+  const shown = S.filter(s => !state.hidden.has(String(s.cat)) && inScope(s));
+  // gray first so CoStar buildings draw on top
+  shown.sort((a, b) => (a.cat === "vx" ? 0 : 1) - (b.cat === "vx" ? 0 : 1));
+  for (const s of shown) {
+    const vx = s.cat === "vx";
+    const p = L.polygon(s.rings, {fillColor: vx ? v("--vx") : TIER[s.cat], fillOpacity: vx ? 0.7 : 0.9,
+      color: vx ? v("--vx-line") : "#1d1d1b", weight: vx ? 0.5 : 1.2});
+    p.bindPopup(() => popup(s), {maxWidth: 340});
+    layer.addLayer(p);
+  }
+  renderLegend(); renderStats();
+}
+function renderLegend() {
+  const box = document.getElementById("legend"); box.innerHTML = "";
+  for (const c of CATS) {
+    const n = S.filter(s => String(s.cat) === String(c.k) && inScope(s)).length;
+    const l = document.createElement("label"); l.className = "chk";
+    l.innerHTML = `<input type="checkbox" ${state.hidden.has(String(c.k)) ? "" : "checked"}><span class="sw" style="background:${c.color}"></span>${c.label}<span class="count">${n.toLocaleString()}</span>`;
+    l.querySelector("input").onchange = e => { e.target.checked ? state.hidden.delete(String(c.k)) : state.hidden.add(String(c.k)); render(); };
+    box.appendChild(l);
+  }
+}
+function renderStats() {
+  const groups = [["Mandatory order", s => s.zone === "order"], ["Warning only", s => s.zone === "warning"],
+                  ["Rest of Hollywood", s => !s.zone], ["Whole map", s => true]];
+  const cs = Object.values(D.costar);
+  const czone = c => c.zone;
+  const cgroups = [c => czone(c) === "order", c => czone(c) === "warning", c => !czone(c), c => true];
+  document.getElementById("stats").innerHTML =
+    `<tr><th>Area</th><th>Outlines</th><th>CoStar bldgs</th><th><span class="sw" style="background:${TIER[4]};width:8px;height:8px;border-radius:50%"></span></th><th>CoStar units</th></tr>` +
+    groups.map(([name, f], i) => {
+      const cb = cs.filter(cgroups[i]);
+      return `<tr><td>${name}</td><td>${S.filter(f).length.toLocaleString()}</td><td>${cb.length}</td>
+        <td>${cb.filter(c => c.tier === 4).length}</td><td>${cb.reduce((a, c) => a + (c.units || 0), 0).toLocaleString()}</td></tr>`;
+    }).join("");
+}
+for (const b of document.querySelectorAll("#scope button")) b.onclick = () => {
+  state.scope = b.dataset.s;
+  for (const x of document.querySelectorAll("#scope button")) x.classList.toggle("on", x === b);
+  render();
+};
+map.fitBounds(zoneLayers.zWarn.getBounds().extend(zoneLayers.zPlan.getBounds()), {padding: [20, 20]});
+render();
+</script>
+</body>
+</html>
