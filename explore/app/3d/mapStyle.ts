@@ -11,6 +11,7 @@ export const VIEWS = {
   hills: { center: [-118.352, 34.108] as [number, number], zoom: 15.2, pitch: 72, bearing: 160 },
   flats: { center: [-118.332, 34.0985] as [number, number], zoom: 16.2, pitch: 64, bearing: 15 },
 };
+export const BUILDING_COLORS = { occupied: "#facc15", empty: "#6b8fb5", burnedEmpty: "#2a2a2e", burnedTrapped: "#dc2626" };
 export const USE_COLORS = ["match", ["get", "use"], "residential", "#e9e4d8", "commercial", "#b8c4d6", "none", "#8d8a83", "#cfcac0"];
 
 export function style(base: keyof typeof BASES): StyleSpecification {
@@ -46,7 +47,11 @@ export function style(base: keyof typeof BASES): StyleSpecification {
         paint: { "fill-color": ["case", ["boolean", ["feature-state", "front"], false], "#ff7a1a", "#5b2310"],
                  "fill-opacity": ["case", ["boolean", ["feature-state", "burned"], false], 0.8, 0] } },
       { id: "buildings", type: "fill-extrusion", source: "buildings",
-        paint: { "fill-extrusion-color": ["case", ["boolean", ["feature-state", "burned"], false], "#3a2a22", USE_COLORS] as never,
+        // Simulation pages set feature-state "st" per building: 1 people inside, 2 empty (everyone out),
+        // 3 burned and empty, 4 burned with people inside. /3d only sets "burned".
+        paint: { "fill-extrusion-color": ["match", ["coalesce", ["feature-state", "st"], 0],
+                   1, BUILDING_COLORS.occupied, 2, BUILDING_COLORS.empty, 3, BUILDING_COLORS.burnedEmpty, 4, BUILDING_COLORS.burnedTrapped,
+                   ["case", ["boolean", ["feature-state", "burned"], false], BUILDING_COLORS.burnedEmpty, USE_COLORS]] as never,
                  "fill-extrusion-height": ["get", "h"],
                  "fill-extrusion-base": 0, "fill-extrusion-opacity": 0.92 } },
       { id: "buildings-costar", type: "fill-extrusion", source: "buildings", filter: ["==", ["get", "costar"], 1],

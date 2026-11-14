@@ -6,7 +6,7 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
-import { style } from "../3d/mapStyle";
+import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { Simulation, mins, type Proposal, type SimBuilding, type Truck } from "../../lib/sim/engine";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 import { COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, type Loaded } from "../sim/simMap";
@@ -67,9 +67,9 @@ export default function ConsoleView() {
       data.current = d;
       renderer.current = new SimRenderer(m, d);
       renderer.current.onTruckClick = id => setSelUnit(id);
-      m.on("click", "people", e => { const id = e.features?.[0]?.properties?.id as string | undefined; if (id) setSelBld(id); });
-      m.on("mouseenter", "people", () => { m.getCanvas().style.cursor = "pointer"; });
-      m.on("mouseleave", "people", () => { m.getCanvas().style.cursor = ""; });
+      m.on("click", "buildings", e => { const id = e.features?.[0]?.properties?.id as string | undefined; if (id && sim.current?.byId.has(id)) setSelBld(id); });
+      m.on("mouseenter", "buildings", () => { m.getCanvas().style.cursor = "pointer"; });
+      m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
       start();
       setReady(true);
     }).catch(err => console.error(err));
@@ -285,9 +285,9 @@ export default function ConsoleView() {
     if (!m || !s || !selBld) return;
     const b = s.byId.get(selBld);
     if (!b) return;
-    m.setFeatureState({ source: "people", id: b.id }, { sel: true });
+    renderer.current?.select(s, b.id);
     m.easeTo({ center: [b.lng, b.lat], duration: 800 });
-    return () => { m.getSource("people") && m.setFeatureState({ source: "people", id: b.id }, { sel: false }); };
+    return () => { renderer.current?.select(null, null); };
   }, [selBld]);
   useEffect(() => {
     const m = map.current, tr = sim.current?.trucks.find(x => x.id === selUnit);
@@ -368,9 +368,12 @@ export default function ConsoleView() {
             </div>);
         })()}
         <div className="legend">
-          <div><i style={{ background: COLORS.able }} />can leave alone</div>
-          <div><i style={{ background: COLORS.need }} />need help</div>
-          <div><i style={{ background: COLORS.trapped }} />trapped</div>
+          <div><i className="sq" style={{ background: BUILDING_COLORS.occupied }} />people inside</div>
+          <div><i className="sq" style={{ background: BUILDING_COLORS.empty }} />everyone out</div>
+          <div><i className="sq" style={{ background: BUILDING_COLORS.burnedEmpty }} />burned, empty</div>
+          <div><i className="sq" style={{ background: BUILDING_COLORS.burnedTrapped }} />burned, people in</div>
+          <div><i style={{ background: COLORS.able }} />walking out (fast)</div>
+          <div><i style={{ background: COLORS.need }} />helped out (slow)</div>
           <div><i className="ln" style={{ borderColor: "#fff7ed" }} />pairing</div>
           <div><i className="ln" style={{ borderColor: COLORS.proposal }} />proposed</div>
         </div>
@@ -529,6 +532,7 @@ const CSS = `
 .ico{width:28px;height:28px;border-radius:50%!important;padding:0!important}
 .legend{margin-top:auto;padding:8px 10px;display:grid;grid-template-columns:1fr 1fr;gap:3px;color:var(--dim);font-size:11px;border-top:1px solid var(--line)}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.legend i.sq{border-radius:2px}
 .legend i.ln{width:14px;height:0;border-radius:0;border-top:2px dashed;vertical-align:3px}
 .count{background:var(--blue);color:#000;border-radius:8px;padding:0 6px;font-weight:700}
 .props{max-height:46%;overflow:auto;padding:6px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)}

@@ -6,14 +6,17 @@ import { RoadGraph, type RoadsJson } from "../../lib/sim/graph";
 import type { DemoBuildingLite, Simulation, StationLite } from "../../lib/sim/engine";
 
 export const FRONT_MIN = 10;
-export const ABLE_PER_DOT = 25;
+export const ABLE_PER_DOT = 20;   // one green dot = 20 people who left on their own
+export const NEED_PER_DOT = 2;    // one purple dot = 2 people who needed help
+export const WALK_M_PER_MIN = { able: 80, need: 30 };  // walking speed along the streets (assumption)
 export const COLORS = { able: "#22c55e", need: "#c084fc", trapped: "#ef4444", truck: "#f97316", onscene: "#16a34a", proposal: "#38bdf8" };
 
 export interface Loaded {
   g: RoadGraph; buildings: DemoBuildingLite[]; stations: StationLite[]; origin: [number, number];
   cells: { id: number; t: number }[]; arrivals: [string, number][];
 }
-interface Walker { lng: number; lat: number; dx: number; dy: number; t0: number; life: number; kind: "able" | "need" }
+interface Walker { route: Route; t0: number; kind: "able" | "need"; side: number }
+interface Route { xs: Float64Array; ys: Float64Array; cum: Float64Array }   // street path to safety, cumulative meters
 export interface PendingLine { truck: string; building: string }
 
 export const fmtT = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
@@ -33,8 +36,7 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
     arrivals,
   };
   const empty = { type: "FeatureCollection" as const, features: [] };
-  m.addSource("people", { type: "geojson", promoteId: "id", data: { type: "FeatureCollection",
-    features: d.buildings.map(b => ({ type: "Feature", properties: { id: b.id }, geometry: { type: "Point", coordinates: [b.lng, b.lat] } })) } });
+  m.addSource("sel", { type: "geojson", data: empty });
   m.addSource("walkers", { type: "geojson", data: empty });
   m.addSource("routes", { type: "geojson", data: empty });
   m.addSource("links", { type: "geojson", data: empty });
@@ -48,20 +50,13 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
   m.addLayer({ id: "targets", type: "circle", source: "links", filter: ["==", ["get", "end"], 1],
     paint: { "circle-radius": 11, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": ["coalesce", ["get", "c"], "#fff7ed"],
              "circle-stroke-width": 2.5, "circle-pitch-alignment": "map" } });
-  const visible = ["any", ["boolean", ["feature-state", "trapped"], false], [">", ["coalesce", ["feature-state", "n"], 0], 0]];
-  m.addLayer({ id: "people", type: "circle", source: "people",
-    paint: {
-      "circle-radius": ["interpolate", ["linear"], ["coalesce", ["feature-state", "n"], 0], 0, 0, 1, 2, 10, 3, 100, 5.5, 400, 9],
-      "circle-color": ["case", ["boolean", ["feature-state", "trapped"], false], COLORS.trapped,
-                       ["boolean", ["feature-state", "need"], false], COLORS.need, COLORS.able],
-      "circle-stroke-color": ["case", ["boolean", ["feature-state", "sel"], false], "#ffffff", "#111"],
-      "circle-stroke-width": ["case", ["boolean", ["feature-state", "sel"], false], 3, 0.6],
-      "circle-opacity": ["case", visible, 0.92, 0] as never,
-      "circle-stroke-opacity": ["case", visible, 0.9, 0] as never,
-    } });
   m.addLayer({ id: "walkers", type: "circle", source: "walkers",
-    paint: { "circle-radius": ["match", ["get", "k"], "need", 3.2, 2.2],
-             "circle-color": ["match", ["get", "k"], "need", COLORS.need, COLORS.able], "circle-opacity": ["get", "o"] } });
+    paint: { "circle-radius": ["match", ["get", "k"], "need", 3.6, 3],
+             "circle-color": ["match", ["get", "k"], "need", COLORS.need, COLORS.able], "circle-opacity": ["get", "o"],
+             "circle-stroke-color": "#0b0b0b", "circle-stroke-width": 0.6, "circle-stroke-opacity": ["get", "o"] } });
+  m.addLayer({ id: "sel", type: "circle", source: "sel",
+    paint: { "circle-radius": 16, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#ffffff", "circle-stroke-width": 3,
+             "circle-pitch-alignment": "map" } });
   return d;
 }
 
@@ -71,17 +66,52 @@ export class SimRenderer {
   private walkers: Walker[] = [];
   private spawned = new Float64Array(0);
   private spawnedNeed = new Float64Array(0);
-  private shown = new Int32Array(0);
+  private shown = new Int8Array(0);          // last building state sent to the map, per sim building
+  private escape: Int32Array;                // next road node toward safety, per node (-1 = already safe)
+  private routes = new Map<number, Route>(); // per sim building idx
   private fire = { burn: 0, cool: 0, bld: 0 };
   onTruckClick?: (id: string) => void;
 
-  constructor(private m: maplibregl.Map, private d: Loaded) {}
+  constructor(private m: maplibregl.Map, private d: Loaded) {
+    // Safe streets = more than 500 m by road from any street the fire reaches. Every road node gets its next
+    // step toward the nearest safe street, so people walk away from the fire along real streets.
+    const g = d.g, fd = new Float64Array(g.n), fp = new Int32Array(g.n);
+    g.dijkstra(g.fireNodes(), -1, fd, fp);
+    const safe: number[] = [];
+    for (let i = 0; i < g.n; i++) if (Number.isFinite(fd[i]) && fd[i] > 500) safe.push(i);
+    const ed = new Float64Array(g.n);
+    this.escape = new Int32Array(g.n);
+    g.dijkstra(safe, -1, ed, this.escape);
+  }
+
+  private route(s: Simulation, idx: number): Route {
+    let r = this.routes.get(idx);
+    if (r) return r;
+    const b = s.buildings[idx], g = this.d.g;
+    const xs = [b.lng], ys = [b.lat];
+    for (let v = b.node, n = 0; v >= 0 && n < 600; v = this.escape[v], n++) { xs.push(g.lng[v]); ys.push(g.lat[v]); }
+    const cum = new Float64Array(xs.length);
+    for (let i = 1; i < xs.length; i++) {
+      const kx = 111320 * Math.cos((ys[i] * Math.PI) / 180);
+      cum[i] = cum[i - 1] + Math.hypot((xs[i] - xs[i - 1]) * kx, (ys[i] - ys[i - 1]) * 110540);
+    }
+    r = { xs: Float64Array.from(xs), ys: Float64Array.from(ys), cum };
+    this.routes.set(idx, r);
+    return r;
+  }
+
+  /** White ring around the selected building (console), or none. */
+  select(s: Simulation | null, id: string | null) {
+    const b = id && s ? s.byId.get(id) : null;
+    (this.m.getSource("sel") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection",
+      features: b ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [b.lng, b.lat] } }] : [] });
+  }
 
   reset(s: Simulation) {
     const m = this.m;
-    m.removeFeatureState({ source: "fire" }); m.removeFeatureState({ source: "buildings" }); m.removeFeatureState({ source: "people" });
+    m.removeFeatureState({ source: "fire" }); m.removeFeatureState({ source: "buildings" });
     this.fire = { burn: 0, cool: 0, bld: 0 };
-    this.shown = new Int32Array(s.buildings.length).fill(-1);
+    this.shown = new Int8Array(s.buildings.length).fill(-1);
     this.spawned = new Float64Array(s.buildings.length);
     this.spawnedNeed = new Float64Array(s.buildings.length);
     this.walkers = [];
@@ -104,37 +134,41 @@ export class SimRenderer {
     while (p.burn < c.length && c[p.burn].t <= t) { m.setFeatureState({ source: "fire", id: c[p.burn].id }, { burned: true, front: true }); p.burn++; }
     while (p.cool < p.burn && c[p.cool].t <= t - FRONT_MIN) { m.setFeatureState({ source: "fire", id: c[p.cool].id }, { front: false }); p.cool++; }
     while (p.bld < a.length && a[p.bld][1] <= t) { m.setFeatureState({ source: "buildings", id: a[p.bld][0] }, { burned: true }); p.bld++; }
-    const [ox, oy] = d.origin;
+    // building state (feature-state, only when it changes): 1 people inside, 2 empty, 3 burned empty, 4 burned with people
     for (const idx of s.dirty) {
       const b = s.buildings[idx];
-      const inside = b.able + b.need;
-      const q = b.trapped >= 0.5 ? 10000 + Math.round(b.trapped) : inside < 0.5 ? 0 : Math.max(1, Math.round(Math.sqrt(inside) * 3)) * 2 + (b.need >= 0.5 ? 1 : 0);
-      if (q !== this.shown[idx]) {
-        this.shown[idx] = q;
-        m.setFeatureState({ source: "people", id: b.id },
-          b.trapped >= 0.5 ? { n: Math.max(1, b.trapped), trapped: true, need: true } : { n: inside < 0.5 ? 0 : inside, need: b.need >= 0.5, trapped: false });
-      }
-      let dx = b.lng - ox, dy = b.lat - oy; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+      const st = b.burned ? (b.trapped >= 0.5 ? 4 : 3) : (b.able + b.need >= 0.5 ? 1 : 2);
+      if (st !== this.shown[idx]) { this.shown[idx] = st; m.setFeatureState({ source: "buildings", id: b.id }, { st }); }
+      // a dot appears only when people have left the building
       const ableOut = b.evacuated - b.evacuatedNeed;
-      while (ableOut - this.spawned[idx] >= ABLE_PER_DOT && this.walkers.length < 1500) {
+      while (ableOut - this.spawned[idx] >= ABLE_PER_DOT && this.walkers.length < 2000) {
         this.spawned[idx] += ABLE_PER_DOT;
-        const j = ((idx * 7919 + this.spawned[idx]) % 100) / 100 - 0.5;
-        this.walkers.push({ lng: b.lng, lat: b.lat, dx: dx + j * 0.8, dy: dy - j * 0.8, t0: t, life: 6, kind: "able" });
+        this.walkers.push({ route: this.route(s, idx), t0: t, kind: "able", side: ((idx * 7 + this.spawned[idx]) % 5) - 2 });
       }
-      while (b.evacuatedNeed - this.spawnedNeed[idx] >= 1 && this.walkers.length < 1500) {
-        this.spawnedNeed[idx] += 1;
-        const j = ((idx * 104729 + this.spawnedNeed[idx] * 31) % 100) / 100 - 0.5;
-        this.walkers.push({ lng: b.lng, lat: b.lat, dx: dx + j, dy: dy - j, t0: t, life: 8, kind: "need" });
+      while (b.evacuatedNeed - this.spawnedNeed[idx] >= NEED_PER_DOT && this.walkers.length < 2000) {
+        this.spawnedNeed[idx] += NEED_PER_DOT;
+        this.walkers.push({ route: this.route(s, idx), t0: t, kind: "need", side: ((idx * 3 + this.spawnedNeed[idx]) % 5) - 2 });
       }
     }
     s.dirty.clear();
-    this.walkers = this.walkers.filter(w => t - w.t0 < w.life);
-    const DEG_PER_M = 1 / 111000;
-    (m.getSource("walkers") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: this.walkers.map(w => {
-      const age = t - w.t0, dist = (w.kind === "need" ? 60 : 80) * age * DEG_PER_M;
-      return { type: "Feature", properties: { k: w.kind, o: Math.max(0, 1 - age / w.life) },
-               geometry: { type: "Point", coordinates: [w.lng + w.dx * dist / Math.cos(w.lat * Math.PI / 180), w.lat + w.dy * dist] } };
-    }) });
+    // walkers move along their street route; they fade out over 2 min once they reach a safe street
+    const FADE = 2, feats: GeoJSON.Feature[] = [], keep: Walker[] = [];
+    for (const w of this.walkers) {
+      const r = w.route, total = r.cum[r.cum.length - 1];
+      const dist = WALK_M_PER_MIN[w.kind] * Math.max(0, t - w.t0);
+      const over = dist >= total ? (dist - total) / WALK_M_PER_MIN[w.kind] : 0;
+      if (over > FADE || t < w.t0) continue;
+      keep.push(w);
+      let i = 1; while (i < r.cum.length - 1 && r.cum[i] < dist) i++;
+      const seg = r.cum[i] - r.cum[i - 1], f = seg > 0 ? Math.min(1, (Math.min(dist, total) - r.cum[i - 1]) / seg) : 1;
+      let x = r.xs[i - 1] + (r.xs[i] - r.xs[i - 1]) * f, y = r.ys[i - 1] + (r.ys[i] - r.ys[i - 1]) * f;
+      // small sideways offset so dots on the same street do not sit on top of each other
+      const dx = r.xs[i] - r.xs[i - 1], dy = r.ys[i] - r.ys[i - 1], L = Math.hypot(dx, dy) || 1;
+      x += (-dy / L) * w.side * 0.000035; y += (dx / L) * w.side * 0.000035;
+      feats.push({ type: "Feature", properties: { k: w.kind, o: 1 - over / FADE }, geometry: { type: "Point", coordinates: [x, y] } });
+    }
+    this.walkers = keep;
+    (m.getSource("walkers") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: feats });
     const routes: GeoJSON.Feature[] = [], links: GeoJSON.Feature[] = [], props: GeoJSON.Feature[] = [];
     for (const tr of s.trucks) {
       const mk = this.markers.get(tr.id);

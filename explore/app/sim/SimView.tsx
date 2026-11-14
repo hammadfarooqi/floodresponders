@@ -3,9 +3,9 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { style } from "../3d/mapStyle";
+import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { DEFAULT_CONFIG, Simulation, type LogEntry, type Policy } from "../../lib/sim/engine";
-import { ABLE_PER_DOT, COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, type Loaded } from "./simMap";
+import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, type Loaded } from "./simMap";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 
 const DURATION = 180, RUN_SECONDS = 25;
@@ -49,17 +49,17 @@ export default function SimView() {
     loadSimLayers(m).then(d => {
       data.current = d;
       renderer.current = new SimRenderer(m, d);
-      m.on("click", "people", e => {
+      m.on("click", "buildings", e => {
         const id = e.features?.[0]?.properties?.id as string | undefined;
         const b = id ? sim.current?.byId.get(id) : undefined;
-        if (!b) return;
+        if (!b) return;   // only buildings the fire reaches have people in the simulation
         new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(
           `<b>${b.label}</b><div style="font-size:12px;line-height:1.5">Fire arrives at ${fmtT(b.fire)}<br>` +
           `Inside: ${n0(b.able + b.need)} (need help: ${n0(b.need)})<br>Evacuated: ${n0(b.evacuated)}<br>Trapped: ${n0(b.trapped)}` +
           `${b.costar ? "<br>CoStar: manager phone on file" : ""}</div>`).addTo(m);
       });
-      m.on("mouseenter", "people", () => { m.getCanvas().style.cursor = "pointer"; });
-      m.on("mouseleave", "people", () => { m.getCanvas().style.cursor = ""; });
+      m.on("mouseenter", "buildings", () => { m.getCanvas().style.cursor = "pointer"; });
+      m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
       setReady(true);
     }).catch(err => { console.error(err); alertBox(String(err)); });
     return () => { m.remove(); map.current = null; };
@@ -219,9 +219,14 @@ export default function SimView() {
 
       {/* legend */}
       <div className="card legend">
-        <div><i className="dot" style={{ background: COLORS.able }} />people who can leave alone (moving dot ≈ {ABLE_PER_DOT})</div>
-        <div><i className="dot" style={{ background: COLORS.need }} />people who need help (moving dot = 1)</div>
-        <div><i className="dot" style={{ background: COLORS.trapped }} />trapped when the fire arrived</div>
+        <div className="lh">Buildings</div>
+        <div><i className="sq" style={{ background: BUILDING_COLORS.occupied }} />people still inside</div>
+        <div><i className="sq" style={{ background: BUILDING_COLORS.empty }} />everyone out</div>
+        <div><i className="sq" style={{ background: BUILDING_COLORS.burnedEmpty }} />burned, empty</div>
+        <div><i className="sq" style={{ background: BUILDING_COLORS.burnedTrapped }} />burned, people inside</div>
+        <div className="lh">People walking to safety on the streets</div>
+        <div><i className="dot" style={{ background: COLORS.able }} />left on their own, fast (1 dot = {ABLE_PER_DOT})</div>
+        <div><i className="dot" style={{ background: COLORS.need }} />needed help, slow (1 dot = {NEED_PER_DOT})</div>
         <div><i className="truckkey">27</i>engine · dashed line = assigned building · yellow = route</div>
       </div>
 
@@ -301,8 +306,10 @@ const CSS = `
 .ev{padding:3px 0;border-bottom:1px solid #ffffff0d;color:#d4d4d8}
 .ev .tm{color:#71717a;font-variant-numeric:tabular-nums;margin-right:6px}
 .ev.reassign{color:#fde68a}.ev.withdraw,.ev.unassign{color:#fca5a5}.ev.call{color:#c4b5fd}.ev.arrive{color:#86efac}
-.legend{left:64px;bottom:12px;padding:8px 10px;font-size:11.5px;display:flex;flex-direction:column;gap:3px}
+.legend{left:64px;bottom:12px;padding:8px 10px;font-size:11.5px;display:flex;flex-direction:column;gap:3px;color:#f4f4f5}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.sq{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;outline:1px solid #ffffff40}
+.lh{font-weight:700;color:#a1a1aa;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
 .truckkey{display:inline-block;font-style:normal;background:#f97316;color:#111;font-weight:700;font-size:10px;border-radius:3px;padding:0 3px;margin-right:6px}
 .result{left:50%;transform:translateX(-50%);bottom:16px;width:420px;padding:12px 14px}
 .result table{width:100%;border-collapse:collapse;margin:6px 0}

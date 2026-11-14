@@ -39,7 +39,7 @@ export class RoadGraph {
 
   /** Shortest road distance (m) from `src` to every node, avoiding edges the fire has closed by `nowMin`.
    *  Writes into `dist` / `prev` (reused buffers). Stops past `maxM` meters. */
-  dijkstra(src: number, nowMin: number, dist: Float64Array, prev: Int32Array, maxM = Infinity) {
+  dijkstra(src: number | number[], nowMin: number, dist: Float64Array, prev: Int32Array, maxM = Infinity) {
     dist.fill(Infinity); prev.fill(-1);
     const heapN: number[] = [], heapD: number[] = [];
     const push = (node: number, d: number) => {
@@ -68,7 +68,7 @@ export class RoadGraph {
       }
       return [topN, topD];
     };
-    dist[src] = 0; push(src, 0);
+    for (const s0 of typeof src === "number" ? [src] : src) { dist[s0] = 0; push(s0, 0); }
     while (heapN.length) {
       const [u, d] = pop();
       if (d > dist[u]) continue;
@@ -79,6 +79,14 @@ export class RoadGraph {
         if (nd < dist[v]) { dist[v] = nd; prev[v] = u; push(v, nd); }
       }
     }
+  }
+
+  /** Nodes touched by any street the fire closes (in the 3-hour scenario). */
+  fireNodes(): number[] {
+    const out: number[] = [];
+    for (let u = 0; u < this.n; u++)
+      for (let k = this.start[u], e = this.start[u + 1]; k < e; k++) if (Number.isFinite(this.fire[k])) { out.push(u); break; }
+    return out;
   }
 
   /** Node list from the Dijkstra source to `target` (inclusive), or null if unreachable. */
