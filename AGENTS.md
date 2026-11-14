@@ -9,17 +9,34 @@ manager to ask who needs help. Details and shared interfaces are in `CONTRACTS.m
 
 **Deadline:** TBD (a human will fill this in). Near the deadline, finish and merge work. Do not start new work.
 
-## Setup, once per machine and once per agent
+## Setup, once per computer (a human does this)
 
 ```
 git clone https://github.com/hammadfarooqi/floodresponders.git && cd floodresponders
-tools/coord init
-tools/coord new-agent <name>      # once for each agent you run, then use the cd and export lines it prints
+tools/coord init <your first name>      # hammad, selina, jackson, or rasul
 ```
 
-`tools/coord` needs `git` and `gh` (logged in). It uses `flock` when installed and its own lock when not.
-You do not need to install anything else. Inside a worktree, call it as `tools/coord`. This file writes
-`coord` for short.
+`tools/coord` needs `git` and `gh` (logged in). Nothing else to install.
+
+To start an agent, open it in the `floodresponders` folder (terminal, desktop app, or IDE) and tell it:
+`Start. Focus: <an area, or "anything">`. Do this again for each agent you want. Each agent names itself.
+
+## Startup (every new agent does this first)
+
+1. If your current folder is already named `floodresponders-<name>`, then `<name>` is your agent name and
+   that folder is yours. Skip to step 3.
+2. Run `tools/coord new-agent`. It gives you the next free name (`<firstname>_<number>`), makes your own
+   folder next to the main one, and posts your `JOIN` event. Read its output.
+   Only if your human told you to share a folder with other agents, run `tools/coord new-agent --here`
+   instead and follow "Shared folder mode" below.
+3. Work only in your own folder. Start every shell command with `cd <your folder> &&`, and edit files only
+   by their path inside that folder. `coord` reads your name from that folder.
+4. Read this file and `CONTRACTS.md` in full.
+5. Run `coord tail 60`, `coord active`, and `coord board` to see who does what.
+6. Post `coord post NOTE "<your focus area>, starting"`. Then run the loop until your human tells you to
+   stop. Your human's instructions override the backlog.
+
+In this file, `coord` is short for `tools/coord`.
 
 ## The three channels
 
@@ -42,7 +59,7 @@ Event messages are short and factual, one to five lines. Write them for an agent
 
 1. `git pull` on main; `coord tail 40`; `coord active`; `coord board`.
 2. If you hold an active claim, continue it. Otherwise pick the highest-priority `status:ready` issue in or near your area that nobody is holding, then `coord claim N`. If you LOST, go back to step 1.
-3. `coord post START --issue N --files <what you'll touch>`. Branch: `agent/$AGENT_NAME/N-slug`.
+3. `coord post START --issue N --files <what you'll touch>`. Branch: `agent/<your name>/N-slug`.
 4. Work in small commits. **About every 15 minutes, or at any milestone:** run `coord since <last-check>`, react to `INTERFACE`, `NEED`, and `DECISION` events that affect you, then post `PROGRESS` (this doubles as your heartbeat).
 5. Before opening the PR: rebase on main, run the checks, and if you touched a shared interface, update CONTRACTS.md and post `INTERFACE`.
 6. `gh pr create --fill --body "Closes #N"`, then `gh pr checks --watch --fail-fast && gh pr merge --squash --delete-branch`. Once it's merged, `coord done N "<one-line result>"`.
@@ -94,20 +111,35 @@ may post `NOTE "taking over stale #N"`, claim the issue, and continue.
 Shared types, API shapes, env vars, and DB schema live in `CONTRACTS.md`. To change one, your PR must
 update `CONTRACTS.md`, and you must post an `INTERFACE` event that names who is affected.
 
-## One worktree per agent
+## One folder per agent (the default)
 
-If more than one agent runs on a machine, each gets its own git worktree (`tools/coord new-agent <name>`).
-Two agents must never share a working directory. They would overwrite each other's uncommitted changes,
-branch checkouts, and build output.
+Each agent works in its own folder (a git worktree) that `tools/coord new-agent` makes. Two agents in one
+folder can overwrite each other's uncommitted changes, branch checkouts, and build output.
 
-- Create issue branches with `git switch -c agent/$AGENT_NAME/N-slug origin/main`.
+- Create issue branches with `git switch -c agent/<your name>/N-slug origin/main`.
 - Use ports unique to your agent. With X as the number in your agent name: web `PORT=$((3000 + X))`,
   API `API_PORT=$((8000 + X))`.
-- Never `cd` into or edit another worktree. Never run `git worktree remove` or `git clean` on a worktree
-  that is not yours.
-- When you stop for good, remove your own worktree with `git worktree remove`.
+- Never `cd` into or edit another agent's folder. Never run `git worktree remove` or `git clean` on a
+  folder that is not yours.
+- When you stop for good, remove your own folder with `git worktree remove`.
 
-All agents on one machine share one log checkout at `<main clone>/.coord`. Do not edit it by hand.
+All agents on one computer share one log checkout at `<main clone>/.coord`. Do not edit it by hand.
+
+## Shared folder mode (only when a human asks for it)
+
+A human may want two or more agents on one branch in one folder, each on a different part of the code.
+An agent uses this mode only when its human says so. Rules for every agent in the shared folder:
+
+- Get your name with `tools/coord new-agent --here`. Put it in front of every coord command:
+  `AGENT_NAME=<your name> tools/coord <command>`. The folder cannot tell `coord` who you are.
+- Stay on the branch that is checked out. Do not run `git switch`, `git checkout`, `git stash`,
+  `git reset`, `git rebase`, `git pull`, or `git clean`. They change files under the other agents.
+- Commit only your own files: `git add <your paths>`, then `git commit`. Never `git add -A` or
+  `git commit -a`.
+- Claims still apply. List your files in your `START` event, and never edit a file that another agent
+  listed.
+- The human, or the one agent the human names, pushes the branch and opens the PR.
+- Use ports unique to your agent, as above.
 
 ## Commits and PRs
 

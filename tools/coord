@@ -10,12 +10,15 @@ LOCK="$COORD/.lock"
 STALE_MIN=45
 TYPES="JOIN CLAIM START PROGRESS DONE BLOCKED NEED INTERFACE DECISION RELEASE NOTE"
 LAST_EVENT=""
+LOCK_DEPTH=0
 
 die() { echo "coord: $*" >&2; exit 1; }
 cgit() { git -C "$COORD" "$@"; }
 
 # Only one process per machine may change the shared .coord checkout at a time.
 lock() {
+  LOCK_DEPTH=$((LOCK_DEPTH + 1))
+  if [ "$LOCK_DEPTH" -gt 1 ]; then return 0; fi
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$LOCK"
     flock 9
@@ -32,6 +35,8 @@ lock() {
 }
 
 unlock() {
+  LOCK_DEPTH=$((LOCK_DEPTH - 1))
+  if [ "$LOCK_DEPTH" -gt 0 ]; then return 0; fi
   if command -v flock >/dev/null 2>&1; then
     exec 9>&-
   else
@@ -40,7 +45,25 @@ unlock() {
   fi
 }
 
+# The agent name: $AGENT_NAME if set, else taken from the worktree folder
+# name (<repo>-<agent>), which is what new-agent creates.
+agent_name() {
+  if [ -n "${AGENT_NAME:-}" ]; then echo "$AGENT_NAME"; return 0; fi
+  local top prefix
+  top=$(git rev-parse --show-toplevel)
+  prefix="$(basename "$ROOT")-"
+  case "$(basename "$top")" in
+    "$prefix"?*) if [ "$top" != "$ROOT" ]; then basename "$top" | sed "s/^$prefix//"; return 0; fi ;;
+  esac
+  die "no agent name. Run 'tools/coord new-agent' and work in the folder it prints. In a shared folder, put AGENT_NAME=<name> in front of each coord command."
+}
+
 cmd_init() {
+  if [ $# -ge 1 ]; then
+    echo "$1" | grep -Eq '^[a-z]+$' || die "the first name must be lowercase letters only, for example: rasul"
+    git config --local coord.owner "$1"
+    echo "coord: agents on this clone will be named $1_1, $1_2, ..."
+  fi
   if [ ! -e "$COORD/.git" ]; then
     git fetch -q origin coord
     git worktree add -q "$COORD" coord
@@ -75,7 +98,7 @@ parse() {
   ')
 }
 
-all_events() { ls "$COORD/events" | grep '\.md$' | sort; }
+all_events() { ls "$COORD/events" | { grep '\.md$' || true; } | sort; }
 
 show() {
   awk -F'\t' '{
@@ -87,7 +110,7 @@ show() {
 }
 
 cmd_post() {
-  [ -n "${AGENT_NAME:-}" ] || die "AGENT_NAME is not set. Run: export AGENT_NAME=<your agent name>"
+  AGENT_NAME=$(agent_name)
   [ $# -ge 1 ] || die "usage: coord post <TYPE> [--issue N] [--files a,b] \"<message>\""
   local type=$1 issue="" files="" msg=""
   shift
@@ -191,7 +214,7 @@ cmd_active() {
 
 cmd_claim() {
   [ $# -eq 1 ] || die "usage: coord claim <issue#>"
-  [ -n "${AGENT_NAME:-}" ] || die "AGENT_NAME is not set"
+  AGENT_NAME=$(agent_name)
   local n=${1#\#}
   gh issue edit "$n" --add-assignee @me --add-label status:claimed --remove-label status:ready >/dev/null
   gh issue comment "$n" --body "claimed by $AGENT_NAME" >/dev/null
@@ -241,21 +264,53 @@ cmd_board() {
 }
 
 cmd_new_agent() {
-  [ $# -eq 1 ] || die "usage: coord new-agent <agent-name>"
-  local name=$1 dir
-  dir="$(dirname "$ROOT")/$(basename "$ROOT")-$name"
-  git fetch -q origin main
-  git worktree add -q "$dir" -b "agent/$name/base" origin/main
+  local name="" here=0 a dir owner n where
+  for a in "$@"; do
+    case "$a" in
+      --here) here=1 ;;
+      -*) die "usage: coord new-agent [name] [--here]" ;;
+      *) name=$a ;;
+    esac
+  done
   cmd_init
-  echo "Worktree ready. Run these two lines, then start your agent there:"
-  echo "  cd $dir"
-  echo "  export AGENT_NAME=$name"
+  lock
+  if [ -z "$name" ]; then
+    owner=$(git config --get coord.owner || true)
+    [ -n "$owner" ] || die "I do not know your first name yet. Run once: tools/coord init <firstname>"
+    cgit pull -q --rebase origin coord || true
+    # Next free number: one more than the highest used in the log or in local agent branches.
+    n=$({ all_events | parse | cut -f3; git for-each-ref --format='%(refname:short)' refs/heads/agent/ | cut -d/ -f2; } |
+      awk -v o="$owner" 'index($0, o "_") == 1 { v = substr($0, length(o) + 2); if (v ~ /^[0-9]+$/ && v + 0 > m) m = v + 0 } END { print m + 1 }')
+    name="${owner}_$n"
+  fi
+  if [ "$here" = 1 ]; then
+    where="shared folder $(basename "$(git rev-parse --show-toplevel)")"
+  else
+    dir="$(dirname "$ROOT")/$(basename "$ROOT")-$name"
+    git fetch -q origin main
+    git worktree add -q "$dir" -b "agent/$name/base" origin/main
+    where="own folder $(basename "$dir")"
+  fi
+  AGENT_NAME=$name
+  cmd_post JOIN "joined, $where" >/dev/null
+  unlock
+  echo "You are $name."
+  if [ "$here" = 1 ]; then
+    echo "Shared folder mode: other agents work in this same folder. Follow the shared folder rules in AGENTS.md."
+    echo "Put your name in front of every coord command:"
+    echo "  AGENT_NAME=$name tools/coord <command>"
+  else
+    echo "Your own folder: $dir"
+    echo "Work only there. Start every shell command with:"
+    echo "  cd $dir && ..."
+    echo "coord reads your name from that folder, so AGENT_NAME is not needed."
+  fi
 }
 
 cmd=${1:-help}
 [ $# -eq 0 ] || shift
 case "$cmd" in
-  init) cmd_init ;;
+  init) cmd_init "$@" ;;
   new-agent) cmd_new_agent "$@" ;;
   post) cmd_post "$@" ;;
   tail) cmd_tail "$@" ;;
@@ -267,8 +322,10 @@ case "$cmd" in
   *)
     cat <<'EOF'
 usage: coord <command>
-  init                          create the shared .coord log checkout (safe to repeat)
-  new-agent <name>              make a worktree for one more agent on this machine
+  init [firstname]              create the shared .coord log checkout (safe to repeat).
+                                With a first name, remember it for automatic agent names
+  new-agent [name] [--here]     name a new agent (next free <firstname>_N) and make its own
+                                folder. --here: no new folder, share the current one
   post <TYPE> [--issue N] [--files a,b] "<message>"
   tail [N]                      last N events (default 40)
   since <ts>                    events after a UTC timestamp

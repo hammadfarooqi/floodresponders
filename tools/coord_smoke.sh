@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for tools/coord. Uses a throwaway local remote, so it needs no network and no gh.
-# Checks: init, new-agent, concurrent posts from two worktrees, tail, since, active.
+# Checks: init, new-agent (given and automatic names, --here), names taken from the folder,
+# concurrent posts from two worktrees, tail, since, active.
 set -euo pipefail
 
 COORD_BIN="$(cd "$(dirname "$0")" && pwd)/coord"
@@ -33,7 +34,6 @@ tools/coord new-agent b_1 >/dev/null
 for agent in a_1 b_1; do
   (
     cd "$TMP/repo-$agent"
-    export AGENT_NAME=$agent
     for i in 1 2 3 4 5 6 7 8 9 10; do tools/coord post NOTE "note $i" >/dev/null; done
   ) &
 done
@@ -42,9 +42,10 @@ wait
 [ ! -e "$TMP/repo-a_1/.coord" ] || fail "agent worktree got its own .coord"
 git fetch -q origin coord
 count=$(git ls-tree -r --name-only origin/coord events | grep -c '\.md$')
-[ "$count" = 20 ] || fail "expected 20 events on the remote, found $count"
+[ "$count" = 22 ] || fail "expected 22 events on the remote (2 JOIN + 20 NOTE), found $count"
+[ "$(tools/coord tail 30 | grep -c ' a_1 NOTE')" = 10 ] || fail "posts from the a_1 folder were not signed a_1"
 
-if AGENT_NAME='' tools/coord post NOTE "x" 2>/dev/null; then fail "post worked without AGENT_NAME"; fi
+if AGENT_NAME='' tools/coord post NOTE "x" 2>/dev/null; then fail "post worked in the main folder without a name"; fi
 
 export AGENT_NAME=a_1
 tools/coord post CLAIM --issue 7 "claiming #7" >/dev/null
@@ -59,7 +60,19 @@ echo "$active" | grep -q '#8' && fail "a DONE issue still shows as active"
 [ "$(tools/coord tail 3 | wc -l | tr -d ' ')" = 3 ] || fail "tail 3 did not print 3 lines"
 last=$(tools/coord tail 4)
 echo "$last" | grep -q 'a_1 START #7 \[api/x.py, web/y.ts\]: starting' || fail "tail format wrong: $last"
-[ "$(tools/coord since 2000-01-01T00:00:00Z | grep -vc '^#')" = 24 ] || fail "since <old ts> should list all 24 events"
+[ "$(tools/coord since 2000-01-01T00:00:00Z | grep -vc '^#')" = 26 ] || fail "since <old ts> should list all 26 events"
 [ "$(tools/coord since 2999-01-01T00:00:00Z | grep -vc '^#')" = 0 ] || fail "since <future ts> should list nothing"
+
+# Automatic names: first name set once, then the next free number.
+unset AGENT_NAME
+if tools/coord new-agent 2>/dev/null; then fail "automatic name worked before 'init <firstname>'"; fi
+tools/coord init a >/dev/null
+out=$(tools/coord new-agent); echo "$out" | grep -qx 'You are a_2.' || fail "expected automatic name a_2"
+[ -d "$TMP/repo-a_2" ] || fail "no folder for a_2"
+out=$(tools/coord new-agent --here); echo "$out" | grep -qx 'You are a_3.' || fail "expected a_3 for the shared folder agent"
+[ ! -e "$TMP/repo-a_3" ] || fail "--here must not make a folder"
+out=$(tools/coord new-agent); echo "$out" | grep -qx 'You are a_4.' || fail "expected a_4 after the shared folder agent"
+(cd "$TMP/repo-a_4" && tools/coord post NOTE "hello" >/dev/null)
+out=$(tools/coord tail 1); echo "$out" | grep -q ' a_4 NOTE: hello' || fail "a_4 post not signed from its folder: $(tools/coord tail 4)"
 
 echo "coord smoke test passed"

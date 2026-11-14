@@ -138,7 +138,7 @@ How the manager side of the call is produced (real phone call, voice in the brow
 
 | Name | Used by | Meaning |
 |---|---|---|
-| `AGENT_NAME` | tools/coord | Your agent name, for example `rasul_1` |
+| `AGENT_NAME` | tools/coord | Your agent name, for example `rasul_1`. Needed only in shared folder mode. Otherwise coord reads it from your folder |
 | `PORT` | web | Dev server port. `3000 + X`, X is the number in your agent name |
 | `API_PORT` | api | Dev server port. `8000 + X` |
 | `NEXT_PUBLIC_API_URL` | web | API base URL, for example `http://localhost:8001` |
