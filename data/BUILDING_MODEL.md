@@ -1,7 +1,105 @@
 # Building model and scoring: draft for discussion
 
-Status: draft for brainstorming, 2026-11-14. Branch `hammad_1`. Numbers are measured on the Hollywood area
-(Hollywood plan area + Sunset Fire evacuation areas): 42,557 Vexcel buildings, 275 CoStar buildings.
+Status: v2, 2026-11-14. Branch `hammad_1`. Measured on the Hollywood area (Hollywood plan area + Sunset Fire
+evacuation areas). Section 0 is the current proposal. Sections 1-5 are the v1 field inventory, kept for reference.
+
+## 0. v2 proposal: score people who need help, with few knobs that have units
+
+### 0.1 Coverage, one denominator (42,557 buildings)
+
+Denominator: 42,557 buildings (all Vexcel outlines in the area). Assessor matched 42,098.
+
+| Field | Source | Has a value | Yes | No | Unknown |
+|---|---|---|---|---|---|
+| building_type | Vexcel | 99.8% | | | 0.2% |
+| footprint_m2 | Vexcel | 100.0% | | | 0% |
+| ground_elevation_m | Vexcel | 100.0% | | | 0% |
+| roof_material | Vexcel | 100.0% | | | 0.03% |
+| roof_condition | Vexcel | 100.0% | | | 0% |
+| roof_tree_cover_pct | Vexcel | 100.0% | | | 0% |
+| tree_cover_zone1_pct | Vexcel | 100.0% | | | 0% |
+| tree_cover_zone2_pct | Vexcel | 100.0% | | | 0% |
+| roof_structural_damage | Vexcel | 100.0% | 20.3% | 79.7% | 0% |
+| use_type | Assessor | 98.6% | | | 1.4% |
+| units | Assessor | 91.7% | | | 8.3% |
+| bedrooms | Assessor | 89.7% | | | 10.3% |
+| floor_area_sqft | Assessor | 95.8% | | | 4.2% |
+| year_built | Assessor | 95.5% | | | 4.5% |
+| stories | CoStar | 0.7% | | | 99.3% |
+| construction_material | CoStar | 0.4% | | | 99.6% |
+| units | CoStar | 0.7% | | | 99.3% |
+| is_walkup | CoStar | 0.5% | 0.08% | 0.4% | 99.5% |
+| elevators | CoStar | 0.2% | | | 99.8% |
+| is_senior | CoStar | 0.7% | 0% | 0.7% | 99.3% |
+| manager_phone | CoStar | 0.5% | | | 99.5% |
+| staircases > 0 | Matterport | 0.7% | 0.04% | 0.7% | 99.3% |
+| windows > 0 | Matterport | 0.7% | 0.2% | 0.5% | 99.3% |
+
+Findings from this table:
+- **The Assessor is the real backbone, not CoStar.** Units 92%, use 99%, floor area 96%, year built 96%.
+- **CoStar and Matterport fields cover under 1% each.** Matterport stairs: 0.04%. Senior housing: 0% yes in this
+  area (none of LA's 10 senior communities is in Hollywood).
+- **Vexcel building type is wrong for "institutional_buildings":** of 5,209, the Assessor says 2,406 are single
+  homes and 1,996 are apartments (2 or more units). Use the Assessor for use; use Vexcel only to drop sheds and
+  garages.
+- **Assessor units are per parcel.** A parcel with a house and a garage would count its units twice. Give the
+  units to the parcel's primary structure only.
+
+### 0.2 Reframe: what decision does the score drive?
+
+Inside an evacuation order, everyone is told to leave. Roll Call adds value by finding the people who **cannot leave
+on their own**, and calling about them first. So the score should estimate **people who need help**, not how likely
+the building is to burn. Roof, vegetation and construction fields predict building ignition. They do not say who is
+trapped. Keep them for a later "structure risk" view, not for the call queue.
+
+### 0.3 The model (6 knobs, each with a unit and a source)
+
+    priority = people_needing_help × urgency
+
+    people_needing_help = people_est × need_rate
+    people_est          = units × household_size × (1 − vacancy)              [people]
+                          units: CoStar → Assessor; vacancy: CoStar, else area default
+                          sheds/garages = 0; non-residential = off for now (day/night question)
+    need_rate           = base_need_rate × building_multiplier                 [share of people]
+                          base_need_rate: share of residents 65+ or with an ambulatory disability (census tract)
+                          building_multiplier: senior housing → replace base rate with senior rate;
+                                               3+ stories and (walk-up or no elevator) → × upper_floor_factor
+    stories             = CoStar → Assessor floor area ÷ Vexcel footprint (works for 95% of buildings)
+    urgency             = 1 / (1 + eta_min / tau)                               [0..1]
+                          eta_min from the fire scenario; dense vegetation in zones 1-2 shortens eta
+
+| Knob | Default | Source / reason |
+|---|---|---|
+| `household_size` | 2.4 (check) | US Census for LA; per tract when we have census access |
+| `base_need_rate` | 0.10 (check) | ACS share 65+ or ambulatory difficulty, per tract |
+| `senior_need_rate` | 0.5 (assumption) | senior housing residents, many with limited mobility |
+| `upper_floor_factor` | 1.5 (assumption) | stairs are the only way out in a fire (elevators are not used) |
+| `default_vacancy` | 0.05 (check) | CoStar median for the area |
+| `tau` | 30 min (assumption) | time scale: a building 30 min from the fire gets half the urgency |
+
+**Optional switches** (each changes a resolver or a multiplier, never adds a new weight): CoStar on/off,
+Matterport on/off, census on/off, vegetation-shortens-eta on/off, the call result on/off.
+When the call reports N people who need help, `people_needing_help = N`.
+
+### 0.4 How to set the knobs without training data
+
+1. **Use numbers with units and public sources** (census, household size). Most knobs are facts, not weights.
+2. **The rest are labeled assumptions** in one config file, visible in the UI.
+3. **Sensitivity test:** change each knob by ±50% and measure how much the top 50 of the queue changes. If the
+   order hardly moves, the knob does not matter much and the exact value is not important. If it moves a lot,
+   say so in the demo.
+4. **Sanity cases:** a senior walk-up near the fire must rank above a vacant office far away. Write these as tests.
+5. **Do not claim accuracy.** The only ground truth (the evacuation area) checks the fire model, not who needed help.
+
+### 0.5 Questions we have not answered yet
+
+1. **Census access:** the Census API now needs a free key (one human sign-up). Without it, there is no per-area
+   data on seniors or disability, so `base_need_rate` is one number for the whole city.
+2. **Day or night?** At night people are at home; by day, offices and shops are full. The demo should pick one.
+3. **Responder capacity:** a queue only matters if responders are the limit. How many units, and how long per
+   building?
+4. **The call is the best data source.** Design the queue to call the buildings where the score is both high and
+   uncertain first.
 
 ## 1. Sources and how many buildings each covers
 
