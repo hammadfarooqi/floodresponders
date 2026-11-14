@@ -26,7 +26,7 @@ call its manager.
 | `api/` | Python, FastAPI, Pydantic models, pytest, ruff |
 | `agent/` | Python, LangChain Deep Agents (`deepagents` package). LLM provider: TBD |
 | Voice or phone for the call | TBD (human decision) |
-| Storage | In memory, loaded from JSON files in `data/`. No database for now |
+| Storage | Supabase: hosted Postgres with PostGIS turned on, project `Responder0`, region us-east-1. It has no tables yet. The schema is TBD and will be added to this file. Until then, code keeps reading the JSON files in `data/` |
 | Hosting | TBD. Local demo is the default |
 
 ## Data sources
@@ -143,12 +143,15 @@ How the manager side of the call is produced (real phone call, voice in the brow
 | `PORT` | web | Dev server port. `3000 + X`, X is the number in your agent name |
 | `API_PORT` | api | Dev server port. `8000 + X` |
 | `NEXT_PUBLIC_API_URL` | web | API base URL, for example `http://localhost:8001` |
+| `SUPABASE_URL` | api, data | Supabase project URL. Ask Rasul for the value |
+| `SUPABASE_SECRET_KEY` | api, data | Full read and write access, skips row security. Server code and import scripts only. Never in `web/`, never in a `NEXT_PUBLIC_` variable |
+| `SUPABASE_PUBLISHABLE_KEY` | web (later) | Key that is safe in a browser. It can read a table only after that table has a row security rule. Not needed while the web app reads through the API |
 | LLM provider key | agent | TBD, name depends on the provider |
 | Voice or phone provider keys | agent | TBD |
 | `MATTERPORT_API_KEY`, `MATTERPORT_API_TOKEN`, `MATTERPORT_SDK_KEY`, `VEXCEL_API_KEY`, `COSTAR_KIT_ZIP_PASSWORD` | data | Sponsor keys, in the root `.env`. CoStar data is a local kit at `data/costar-kit/`, not an API. Probes and pipeline: branch `hammad_1`, `data/README.md` |
 | Map token | web | TBD, only if the map library needs one |
 
-Never commit secrets. Use a local `.env` file. `.env*` is in `.gitignore`. Each area keeps a `.env.example`
+Never commit secrets. This repo is public. Use a local `.env` file. `.env*` is in `.gitignore`. Each area keeps a `.env.example`
 with names only.
 
 ## File layout
