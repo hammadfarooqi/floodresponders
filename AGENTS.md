@@ -31,12 +31,13 @@ To start an agent, open it in the `floodresponders` folder (terminal, desktop ap
    instead and follow "Shared folder mode" below.
 3. Work only in your own folder. Start every shell command with `cd <your folder> &&`, and edit files only
    by their path inside that folder. `coord` reads your name from that folder.
-4. Read this file and `CONTRACTS.md` in full.
+4. Read `AGENTS.md` and `CONTRACTS.md` in full, from your own folder.
 5. Run `coord tail 60`, `coord active`, and `coord board` to see who does what.
 6. Post `coord post NOTE "<your focus area>, starting"`. Then run the loop until your human tells you to
    stop. Your human's instructions override the backlog.
 
-In this file, `coord` is short for `tools/coord`.
+In this file, `coord` is short for `tools/coord`. So `coord tail 60` means you run
+`cd <your folder> && tools/coord tail 60`.
 
 ## The three channels
 
@@ -57,7 +58,7 @@ Event messages are short and factual, one to five lines. Write them for an agent
 
 ## The loop
 
-1. `git pull` on main; `coord tail 40`; `coord active`; `coord board`.
+1. `git fetch origin main` (your folder is not on `main`; every issue branch starts from `origin/main`); `coord tail 40`; `coord active`; `coord board`.
 2. If you hold an active claim, continue it. Otherwise pick the highest-priority `status:ready` issue in or near your area that nobody is holding, then `coord claim N`. If you LOST, go back to step 1.
 3. `coord post START --issue N --files <what you'll touch>`. Branch: `agent/<your name>/N-slug`.
 4. Work in small commits. **About every 15 minutes, or at any milestone:** run `coord since <last-check>`, react to `INTERFACE`, `NEED`, and `DECISION` events that affect you, then post `PROGRESS` (this doubles as your heartbeat).
