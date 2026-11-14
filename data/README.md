@@ -1,0 +1,71 @@
+# data/: sponsor data pipeline
+
+This folder turns the CoStar, Vexcel and Matterport data into one record per building, and draws a coverage map.
+
+## Setup (each person, once)
+
+1. Copy `.env.example` (repo root) to `.env` and fill in the sponsor keys from the hackathon portal.
+2. Download the CoStar hackathon kit zip from the portal, unzip it with the password, and put the folder at
+   `data/costar-kit/`. Do not commit it: it is too big for GitHub and holds sponsor data.
+3. Python 3.9 or newer. The scripts use only the standard library.
+
+`data/costar-kit/`, `data/cache/` and `data/processed/` are in `.gitignore`. Never commit them.
+
+## Run
+
+```
+python3 data/pipeline/costar_extract.py                 # CoStar -> data/processed/costar_{la,houston}.json
+python3 data/pipeline/enrich.py matterport la           # stairs, windows, doors per scan (cached)
+python3 data/pipeline/enrich.py vexcel la               # ground elevation, roof, parcel (cached)
+python3 data/pipeline/enrich.py footprints la           # building outlines (cached)
+python3 data/pipeline/build_map.py                      # merge -> buildings_{city}.json + coverage_map.html
+```
+
+Use `houston` in place of `la` for Houston. API responses are cached in `data/cache/`, so a re-run only calls the API
+for new ids. A full run for one city takes about 15 minutes.
+
+Open the map: `cd data/processed && python3 -m http.server 8765`, then http://127.0.0.1:8765/coverage_map.html
+
+## Files
+
+| Path | What it is |
+|---|---|
+| `probe/matterport.py`, `probe/vexcel.py` | Small API clients, also usable from the command line |
+| `probe/costar_coverage.py` | How often each field is filled in the CoStar kit |
+| `pipeline/` | The pipeline above, and the map template |
+| `boundaries/` | Public LA boundaries: city limit, 35 Community Plan Areas, 348 county statistical areas |
+
+## What each source gives (tested 2026-11-14)
+
+| Need | Source and field | Coverage |
+|---|---|---|
+| Location | CoStar `primaryAddress.latitude/longitude` | 100% |
+| Stories | CoStar `numStoriesAboveGrade` | ~100% |
+| Construction material | CoStar `buildingConstructionMaterial` | LA 65%, Houston 82% |
+| Units, vacancy | CoStar `propertyApartment.totalNumUnits`, `vacancyPercent` | 91%, 61% of apartments |
+| Senior housing | CoStar `apartmentLifestyleType == 2` | LA 10, Houston 35 communities |
+| Walk-up, elevators | CoStar `propertyApartment.isWalkup`, `elevators` | partial |
+| Manager contact | CoStar contacts (PropertyManager) and `sitePhoneNumber` | phones are fake 555 numbers |
+| Ground elevation, roof, footprint | Vexcel `/property/extract` | ~99% |
+| Stairs, windows, doors | Matterport GraphQL rooms and openings | ~35% of buildings |
+| Tenant age | none | not available; the manager call must ask |
+
+Vexcel `include=calculated` roof height is wrong for large buildings. Use CoStar stories instead.
+
+## Completeness tiers (map colors)
+
+| Tier | Color | Meaning |
+|---|---|---|
+| 4 | green | CoStar core (stories, material, units) + Vexcel elevation + Matterport stairs or windows |
+| 3 | blue | CoStar core + Vexcel, no stairs or windows in scans |
+| 2 | yellow | Vexcel + partial CoStar (material or units missing) |
+| 1 | pink | CoStar only |
+
+## Decision: LA focus area (2026-11-14, Hammad)
+
+For LA we use **Core + Westlake**: the Community Plan Areas Wilshire, Hollywood, Downtown and Westlake. It is one
+connected block with 893 buildings (180 complete, tier 4), about 64,900 apartment units and 3 senior communities.
+
+- East (Silver Lake–Echo Park, Northeast LA): not now.
+- Westside (West LA, Westwood, Palms, Brentwood–Pacific Palisades): maybe later.
+- Houston is fully processed too (1,758 buildings). Which city the demo uses is still open.
