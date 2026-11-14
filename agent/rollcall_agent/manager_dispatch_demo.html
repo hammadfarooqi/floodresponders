@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roll Call · Manager dispatch demo</title>
+<style>
+  :root {color-scheme:dark;background:#0c151f;color:#ecf3f8;font-family:system-ui,sans-serif}
+  * {box-sizing:border-box}
+  body {margin:2.5rem auto;padding:0 1rem;max-width:70rem}
+  h1 {font-size:clamp(2rem,6vw,3.5rem);margin-bottom:.25rem;letter-spacing:-.045em}
+  h2 {font-size:1.15rem;margin-top:0}
+  p, label {color:#b4c4d3}
+  main {display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem}
+  section {background:#142332;border:1px solid #304459;border-radius:.6rem;padding:1.25rem}
+  input, textarea, select, button {font:inherit}
+  textarea {display:block;width:100%;margin:.45rem 0 .7rem;padding:.6rem}
+  input,select {padding:.45rem;margin:.2rem}
+  input {width:5rem}
+  button {padding:.55rem .7rem;background:#22384c;color:inherit;border:1px solid #4b6882;border-radius:.3rem;cursor:pointer}
+  button:disabled {opacity:.65;cursor:default}
+  li {padding:.35rem 0}
+  .status {min-height:1.3em}
+  [hidden] {display:none}
+  @media(max-width:680px){main{grid-template-columns:1fr}}
+</style>
+<h1>Roll Call</h1>
+<p>Simulated manager calls and fire truck dispatch. The displayed phone numbers are fictional.</p>
+<button id="start" type="button">Match and call highest risk</button>
+<main>
+  <section>
+    <h2>Manager call</h2>
+    <p id="call" class="status" role="status">Start the simulation to call a building manager.</p>
+    <form id="report" hidden>
+      <label for="count">People who need help</label><input id="count" type="number" min="1" max="100" value="5" required>
+      <label for="transcript">Manager report</label>
+      <textarea id="transcript" maxlength="500" rows="3" placeholder="Unit 3B needs help with stairs." required></textarea>
+      <button id="dictate" type="button">Dictate</button>
+      <button>Send report</button>
+    </form>
+    <p id="status" class="status" role="status"></p>
+    <ol id="turns" aria-label="Call transcript"></ol>
+  </section>
+  <section>
+    <h2>Priority queue</h2>
+    <ol id="queue"></ol>
+    <form id="additional" hidden>
+      <label for="building">Additional manager</label><select id="building"></select>
+      <button>Simulate call</button>
+    </form>
+    <h2>Truck assignments</h2>
+    <ul id="assignments"></ul>
+    <h2>Notifications</h2>
+    <ul id="notifications"></ul>
+  </section>
+</main>
+<script>
+  const element = id => document.getElementById(id);
+  let callId;
+  let dictation;
+  function items(id, strings) {
+    element(id).replaceChildren(...strings.map(text => {
+      const li = document.createElement("li");
+      li.textContent = text;
+      return li;
+    }));
+  }
+  function speak(text) {
+    const speech = window.speechSynthesis;
+    const voice = speech?.getVoices().find(candidate => candidate.localService && candidate.lang.startsWith("en"));
+    if (!voice || !text) return;
+    speech.cancel();
+    const reply = new SpeechSynthesisUtterance(text);
+    reply.voice = voice;
+    speech.speak(reply);
+  }
+  async function post(path, values) {
+    const response = await fetch(path, {
+      method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(values)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Could not complete the call.");
+    return data;
+  }
+  function render(data) {
+    callId = data.call_id;
+    const names = Object.fromEntries(data.queue.map(building => [building.id, building.name]));
+    element("call").textContent = "Simulated call to " + data.destination.name + " · " + data.destination.phone;
+    items("turns", data.transcript.map(turn => turn.speaker + ": " + turn.text));
+    items("queue", data.queue.map(building =>
+      building.name + " · " + building.people_need_help_est + " need help · fire ETA " + building.fire_arrival_min + " min"
+    ));
+    items("assignments", data.assignments.map(item => item.truck_id + " → " + names[item.building_id]));
+    items("notifications", (data.actions || []).filter(action => action.type === "notify")
+      .map(action => (names[action.id] || action.id) + ": " + action.message));
+    element("building").replaceChildren(...data.queue.map(building => new Option(building.name, building.id)));
+    element("additional").hidden = false;
+    element("report").hidden = Boolean(data.actions);
+    const lastAgent = data.transcript.filter(turn => turn.speaker === "agent").at(-1);
+    speak(data.actions
+      ? data.residents_needing_help.map(need => "Help requested for unit " + need.unit + ".").join(" ") + " Assignments updated."
+      : lastAgent?.text);
+  }
+  async function perform(operation) {
+    const buttons = document.querySelectorAll("button");
+    for (const button of buttons) button.disabled = true;
+    element("status").textContent = "";
+    try { render(await operation()); }
+    catch (error) { element("status").textContent = error.message; }
+    finally { for (const button of buttons) button.disabled = false; }
+  }
+  element("start").onclick = () => perform(() => post("/start", {}));
+  element("additional").onsubmit = event => {
+    event.preventDefault();
+    perform(() => post("/start", {building_id: element("building").value}));
+  };
+  element("report").onsubmit = event => {
+    event.preventDefault();
+    perform(() => post("/report", {
+      call_id: callId, count: Number(element("count").value), transcript: element("transcript").value
+    }));
+  };
+  element("dictate").onclick = () => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    dictation = Recognition ? new Recognition() : null;
+    if (!dictation || !("processLocally" in dictation)) {
+      element("status").textContent = "On-device dictation is unavailable. Type the report instead.";
+      return;
+    }
+    dictation.processLocally = true;
+    dictation.lang = "en-US";
+    dictation.onresult = event => { element("transcript").value = event.results[0][0].transcript; };
+    dictation.onerror = () => {
+      element("status").textContent = "Check microphone permission and the local English speech pack, or type the report.";
+    };
+    dictation.onend = () => { element("dictate").disabled = false; };
+    try {
+      dictation.start();
+      element("dictate").disabled = true;
+      element("status").textContent = "Listening for the manager report.";
+    } catch {
+      element("status").textContent = "Could not start dictation. You can type the report.";
+    }
+  };
+</script>
+</html>
