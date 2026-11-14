@@ -21,6 +21,18 @@ python3 data/pipeline/enrich.py footprints la           # building outlines (cac
 python3 data/pipeline/build_map.py                      # merge -> buildings_{city}.json + coverage_map.html
 ```
 
+Hollywood detail (every Vexcel building, not only CoStar, plus the Sunset Fire evacuation areas):
+
+```
+python3.12 data/pipeline/evac_zones.py                  # trace LAFD evacuation areas along OSM roads (needs modern SSL)
+python3 data/pipeline/area_fetch.py hollywood           # every Vexcel parcel in the area, ~15 min, cached per tile
+python3 data/pipeline/build_hollywood_map.py            # -> buildings_hollywood.json + hollywood_map.html
+data/pipeline/watch_hollywood.sh                        # optional: rebuild the map every minute during a fetch
+```
+
+Vexcel area queries return each parcel once per image collection (each year flown), even with `latest=true`.
+`area_fetch.py` keeps only the newest collection per tile.
+
 Use `houston` in place of `la` for Houston. API responses are cached in `data/cache/`, so a re-run only calls the API
 for new ids. A full run for one city takes about 15 minutes.
 
@@ -33,7 +45,8 @@ Open the map: `cd data/processed && python3 -m http.server 8765`, then http://12
 | `probe/matterport.py`, `probe/vexcel.py` | Small API clients, also usable from the command line |
 | `probe/costar_coverage.py` | How often each field is filled in the CoStar kit |
 | `pipeline/` | The pipeline above, and the map template |
-| `boundaries/` | Public LA boundaries: city limit, 35 Community Plan Areas, 348 county statistical areas |
+| `boundaries/` | Public LA boundaries: city limit, 35 Community Plan Areas, 348 county statistical areas, fire perimeters |
+| `boundaries/sunset_fire_2025_evacuation.geojson` | Sunset Fire (8 Jan 2025) LAFD mandatory order and warning areas, traced on OpenStreetMap roads (ODbL). Warning east/north edges assumed |
 
 ## What each source gives (tested 2026-11-14)
 
@@ -69,3 +82,9 @@ connected block with 893 buildings (180 complete, tier 4), about 64,900 apartmen
 - East (Silver Lake–Echo Park, Northeast LA): not now.
 - Westside (West LA, Westwood, Palms, Brentwood–Pacific Palisades): maybe later.
 - Houston is fully processed too (1,758 buildings). Which city the demo uses is still open.
+
+## Decision: LA scenario = Hollywood Hills, Sunset Fire 2025 (2026-11-14, Hammad)
+
+Replay the Sunset Fire (Runyon Canyon, 8 Jan 2025) and a larger "what if" version pushed south by wind. Ground
+truth is LAFD's evacuation areas, not structure damage. Every building in the area comes from Vexcel (42,557 in
+Hollywood + evacuation areas); CoStar adds detail for 275 of them (49 inside the mandatory order area).
