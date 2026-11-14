@@ -41,6 +41,161 @@ Hollywood. The fire front reaches the middle of the Hollywood area (about Sunset
 Honesty rules for the demo: numbers come from a simulation with labeled assumptions; do not claim measured lives
 saved; do not present "who was trapped" statistics that only follow from our own assumptions.
 
+## Architecture: the six phases
+
+The system has six phases. Each phase reads what the phases before it produce. Read this section to learn where
+your work sits and what the other phases expect from it. The exact shapes are in "Data models" and "API" below.
+
+```
+Vexcel, CoStar kit, public data
+        |  import once
+        v
+  [1] Data ----------> [2] 3D map <------- colors ------- [3] Score
+        |                   ^                                 |
+        |                   | trucks, routes, people          | priority per building
+        |                   |                                 v
+        +--------------> [5] Routing on the map <------- [4] Matching and routing
+                                                              ^
+                                                              | events from calls
+                                                         [6] Phone call
+```
+
+| Phase | What it does | Reads | Produces | Code |
+|---|---|---|---|---|
+| 1. Data | Loads every building of the area one time | Vexcel API, CoStar kit, public data | Supabase tables, `DemoBuilding` | `data/` |
+| 2. 3D map | Draws every building in 3D on the terrain | Outlines and heights from phase 1 | The map that phases 3 and 5 draw on | `web/` |
+| 3. Score | Ranks buildings and colors them on the map | Buildings, `FireTimeline`, `SimConfig` | A priority for each building | `api/`, `web/` |
+| 4. Matching and routing | Sends each responder unit to a building, on real streets | Priorities, `RoadGraph`, `Station`, `Truck` | `[Assignment]`, a route for each unit | `api/` |
+| 5. Routing on the map | Shows units, routes and people leaving, over time | Assignments, routes, simulation state | The animated run and its counters | `web/` |
+| 6. Phone call | Talks to building managers and drivers, and changes the plan | The call, the current state | `AgentEvent`, then `AgentAction` | `agent/`, `api/` |
+
+A "responder unit" is a fire truck in the demo. The same design holds for police or ambulance units.
+
+**The loop that matters:** a call (6) produces an event, the event changes the matching (4), and the map (5) shows
+the unit on its new route. Phases 1 to 3 run before the fire starts. Phases 4 to 6 repeat during the run.
+
+### Phase 1: Data
+
+**Goal:** all building data for the area is in our own store before the demo starts. The app never calls Vexcel
+or CoStar while it runs.
+
+- **Why import once:** the area is fixed, so the data does not change during a run. The app does not wait for a
+  sponsor API, and the Vexcel rate limit only affects how long the import takes.
+- **Vexcel is the list of buildings.** It has an outline for every structure. CoStar adds detail to under 1% of
+  them (362 of 40,246 rows). No phase may assume that a building has CoStar data.
+- **Two sets of columns.** `buildings` keeps the measured Vexcel values, and a second set of resolved values that
+  the app uses (`height_m`, `floors`, `units`, `est_occupants`, `building_type`). Each resolved value has a
+  `*_source` column, and each row has a `confidence` from 0 to 1.
+- **Order of trust:** CoStar first, then the Assessor (not loaded yet), then Vexcel, then our own estimate.
+- **Null means "not known".** It never means "no" or zero.
+- **Not stored:** fire arrival times, scores, assignments and call data. They depend on the run and belong to
+  phases 3 to 6.
+- **Two forms today:** the Supabase tables, and the generated files in `data/demo/` that the API serves as
+  `DemoBuilding`. They differ in area (40,246 and 42,557 buildings), floor height and ids. See `DATABASE.md`,
+  problems 16 to 19.
+- **A live sponsor call can still be right** for data that is large and needed for one building only, such as a
+  photo of the building a unit is sent to. Nothing uses this yet.
+
+### Phase 2: 3D map
+
+**Goal:** a 3D view of the real area. Every building is its Vexcel outline, raised to `height_m`, on real terrain.
+
+- **About 40,000 buildings.** Load the outlines one time. The Supabase REST API returns at most 1,000 rows for
+  each request, so do not load them from the browser row by row.
+- **Change single buildings, do not repaint all of them.** A change of the paint or filter rules on every frame was
+  slow in the MapLibre prototype with 42,000 buildings. Set the state of the buildings that changed (MapLibre
+  feature state).
+- **Some heights are missing.** About 3,400 rows have no `height_m`. The map needs a default height for them.
+- **Most buildings have no name and no address.** Vexcel gives a location and an outline only. A building detail
+  panel must work without them.
+- **The map is the base for phases 3 and 5.** Colors, units, routes and people are layers on this map. They must
+  not need a second map.
+- `SUPABASE_SECRET_KEY` is never used in `web/`. The web app reads through the API.
+
+### Phase 3: Score
+
+**Goal:** one priority for each building, shown as a color on the map, so a person can see where help is needed.
+
+- **The score counts people who need help, and how soon the fire arrives.**
+  Priority = `people_need_help_est` x urgency. Urgency comes from `fire_arrival_min`.
+- **It does not predict which building burns.** Roof, tree cover and construction fields describe the structure.
+  They are not part of this priority.
+- **Every assumption is in `SimConfig`** (people for each unit, share who need help, and so on) and is shown in
+  the UI. Do not put a second copy of an assumption in code.
+- **Handle missing values.** `units` is null for 8,466 rows. Sheds and garages (`is_accessory`) have no people.
+  Some estimated unit counts are far too high (`DATABASE.md`, problem 26): cap them or check them.
+- **Show confidence with the score.** Most occupant numbers are estimates. "High priority, low confidence" is a
+  correct result, and a call (phase 6) is how the system learns more about that building.
+- **Flags for the responder.** These exist on CoStar rows only: `floors`, `is_walkup`, `passenger_elevators`,
+  `has_sprinklers`, `construction_material`, `year_built`. Fire escapes, stairwells and exits are not in the
+  database. Matterport has interior data for under 1% of buildings.
+- **The score is a pure function** of the building, the fire timeline and `SimConfig`. The same input gives the
+  same score, so phases 4 and 5 can call it again at any simulated minute.
+
+### Phase 4: Matching and routing
+
+**Goal:** decide which unit goes to which building, and the streets it uses. Decide again when something changes.
+
+- **Matching:** `match(state, policy) -> [Assignment]`. Policy `"ours"` uses the phase 3 priority and the travel
+  time. Policy `"nearest"` is the comparison. Both are pure functions over the same state.
+- **Routing:** the shortest path on `RoadGraph` from the unit to `building_node` of the building. Units start at
+  `Station.node`. The graph is undirected, because responders ignore one-way rules.
+- **The fire closes streets.** An edge with `fire_min` at or before the current minute cannot be used. A route
+  that was valid can become invalid, so travel times change during the run.
+- **When to match again:** every `rematch_every_min` simulated minutes, and after each `AgentEvent` from phase 6.
+  A unit that is already on the road can get a new building.
+- **Each assignment has a `reason`.** Phase 5 shows it, and phase 6 says it on the phone.
+- **Matching has no state of its own.** The caller sends the full state each time. This keeps the two demo runs
+  fair and makes the result easy to test.
+
+### Phase 5: Routing on the map
+
+**Goal:** show the run over time on the phase 2 map: the fire, the units on their routes, and the people.
+
+- **The simulation runs in the browser.** It owns the clock, the unit positions and the people counts. The API
+  serves data and runs matching and the agent.
+- **Time:** about 180 simulated minutes play in under 30 seconds, with play, pause and speed.
+- **Units** move along the phase 4 route, with a dashed line to the assigned building. The line moves when the
+  assignment changes.
+- **People** are dots. They leave slowly without help and faster when a unit is on scene. People still inside
+  when the fire arrives count as trapped.
+- **Same seed, same run.** The simulation is deterministic for one `seed`, so the two policies are compared on the
+  same fire, people and units.
+- **Call results must be visible.** When phase 6 changes an assignment, the map shows the change and the
+  transcript panel shows why.
+- **Honesty rules** from the "Demo" section apply to every number on screen.
+
+### Phase 6: Phone call
+
+**Goal:** the agent speaks for the dispatcher on the phone, learns what the data cannot tell us, and changes the
+plan.
+
+- **Who is on the call:** building managers and supervisors, and the drivers of the units. In the demo these are
+  our own phones and voices.
+- **Why it exists:** occupant numbers are estimates. A manager knows if a tenant is stuck or if the building is
+  already empty. A driver knows if the unit cannot go.
+- **Only CoStar buildings can be called,** because only they have a manager contact. Every phone number in the
+  CoStar kit is fake. A real call needs a `contacts` row with our own number and `is_test_number = true`.
+  Never commit a real phone number.
+- **The call produces an event, and the agent does not edit the plan directly.**
+  `handle_event(state, event)` returns `AgentAction`s: a `rematch` from phase 4, and `notify` messages to the
+  people affected.
+- **Events today:** `driver_declines` and `tenant_stuck`. There is no event yet for "everyone is out of the
+  building", which would free the unit for another building. To add it, change `AgentEvent` in this file.
+- **Voice is a separate layer.** The conversation logic must work with text in and text out, so that a real phone
+  call, a voice in the browser and a simulated manager all use the same code. The provider is TBD.
+- **Call data is personal.** Keep it in memory only and delete it when the simulation is reset.
+
+### Rules that apply to every phase
+
+- **One building id through the whole run.** Phases 2 to 6 use `DemoBuilding.id`. Database row ids are different
+  (`DATABASE.md`, problem 19).
+- **Earlier phases do not depend on later ones.** The map and the score work with no calls and no units.
+- **Assumptions have one home:** `SimConfig` for the simulation, the constants in `data/db/build_rows.py` for the
+  import.
+- **Estimates stay labeled** from the database to the screen (`*_source`, `confidence`).
+- **This repo is public.** No sponsor data, no real phone numbers and no keys in any commit.
+
 ## Stack
 
 | Part | Choice |
