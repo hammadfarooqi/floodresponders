@@ -84,6 +84,7 @@
     <label class="chk"><input type="checkbox" id="showCity" checked> LA City limit (thick line)</label>
     <label class="chk"><input type="checkbox" id="showPlan" checked> Community Plan Areas (35, labeled)</label>
     <label class="chk"><input type="checkbox" id="showHood"> Neighborhoods &amp; cities (348)</label>
+    <label class="chk"><input type="checkbox" id="showFires"> <span class="focus-sw" style="border-color:#c2261d;background:#c2261d33"></span> Real fire perimeters (CAL FIRE + NIFC). Labels: 50+ acres since 1990</label>
 
     <h2>Regions ranked by complete buildings</h2>
     <div class="seg" id="groupBy"><button data-g="plan_area" class="on">Plan areas</button><button data-g="neighborhood">Neighborhoods</button></div>
@@ -157,6 +158,17 @@ function buildOverlays() {
       {pane: "regions", renderer: regionRenderer, interactive: false,
        style: {color: o.color, weight: 3, fillColor: o.color, fillOpacity: 0.2}});
   }
+  if (R.fires) {
+    overlays.fires = L.geoJSON(R.fires, {pane: "regions", renderer: regionRenderer, interactive: false,
+      style: f => ({color: "#c2261d", weight: f.properties.year >= 2000 ? 2 : 1, fillColor: "#c2261d",
+                    fillOpacity: f.properties.year >= 2000 ? 0.25 : 0.1})});
+    overlays.fireLabels = L.layerGroup();
+    for (const f of R.fires.features) {
+      if (f.properties.year < 1990 || f.properties.acres < 50) continue;
+      overlays.fireLabels.addLayer(L.tooltip({permanent: true, direction: "center", className: "region-label", interactive: false})
+        .setLatLng(L.geoJSON(f).getBounds().getCenter()).setContent(`<span style="color:#c2261d">🔥 ${f.properties.name}</span>`));
+    }
+  }
   overlays.labels = L.layerGroup();
   for (const f of R.plan_area.features) {
     const c = L.geoJSON(f).getBounds().getCenter();
@@ -170,6 +182,7 @@ function syncOverlays() {
               neighborhood: document.getElementById("showHood").checked};
   on.labels = on.plan_area;
   for (const o of optsFor()) on["focus_" + o.id] = focusOn.has(o.id);
+  on.fires = on.fireLabels = document.getElementById("showFires").checked;
   for (const k in overlays) on[k] ? overlays[k].addTo(map) : map.removeLayer(overlays[k]);
 }
 function renderFocusOpts() {
@@ -195,7 +208,7 @@ for (const b of document.querySelectorAll("#focusMode button")) b.onclick = () =
   for (const x of document.querySelectorAll("#focusMode button")) x.classList.toggle("on", x === b);
   render(); if (state.focusOnly) fitFocus();
 };
-for (const id of ["showCity", "showPlan", "showHood"]) document.getElementById(id).onchange = syncOverlays;
+for (const id of ["showCity", "showPlan", "showHood", "showFires"]) document.getElementById(id).onchange = syncOverlays;
 for (const b of document.querySelectorAll("#groupBy button")) b.onclick = () => {
   state.groupBy = b.dataset.g; state.region = null;
   for (const x of document.querySelectorAll("#groupBy button")) x.classList.toggle("on", x === b);
