@@ -4,74 +4,109 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roll Call · Manager dispatch demo</title>
 <style>
-  :root {color-scheme:dark;background:#0c151f;color:#ecf3f8;font-family:system-ui,sans-serif}
+  :root {color-scheme:dark;background:#0b151c;color:#f0f6f4;font-family:Inter,system-ui,sans-serif;--border:#314651;--accent:#8ce3c4;--muted:#aebfc9}
   * {box-sizing:border-box}
-  body {margin:2.5rem auto;padding:0 1rem;max-width:70rem}
-  h1 {font-size:clamp(2rem,6vw,3.5rem);margin-bottom:.25rem;letter-spacing:-.045em}
-  h2 {font-size:1.15rem;margin-top:0}
-  p, label {color:#b4c4d3}
-  main {display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem}
-  section {background:#142332;border:1px solid #304459;border-radius:.6rem;padding:1.25rem}
+  body {margin:auto;padding:0 clamp(1rem,4vw,3rem) 3rem;max-width:75rem}
+  header {display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 0;border-bottom:1px solid var(--border)}
+  header strong {font-size:1.15rem;letter-spacing:-.04em}
+  header span {font-size:.8rem;color:var(--accent)}
+  .intro {padding:clamp(1.5rem,4vw,3rem) 0 1.6rem}
+  h1 {font-size:clamp(2rem,5vw,3.25rem);margin:0;letter-spacing:-.055em;line-height:1.08}
+  h2 {font-size:1.1rem;margin:0;letter-spacing:-.025em}
+  p,label {color:var(--muted);line-height:1.5}
+  p {margin:.65rem 0}
+  main {display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:1rem;align-items:start}
+  section {background:#14222b;border:1px solid var(--border);border-radius:.75rem;padding:clamp(1rem,3vw,1.5rem)}
   input, textarea, select, button {font:inherit}
-  textarea {display:block;width:100%;margin:.45rem 0 .7rem;padding:.6rem}
-  input,select {padding:.45rem;margin:.2rem}
+  textarea,input,select {background:#0d1a21;border:1px solid var(--border);border-radius:.4rem;color:inherit;padding:.55rem}
+  textarea {display:block;width:100%;margin:.45rem 0 .7rem;resize:vertical}
+  input,select {margin:.2rem;max-width:100%}
   input {width:5rem}
-  button {padding:.55rem .7rem;background:#22384c;color:inherit;border:1px solid #4b6882;border-radius:.3rem;cursor:pointer}
+  button {padding:.6rem .8rem;background:#20343e;color:inherit;border:1px solid var(--border);border-radius:.4rem;cursor:pointer;font-weight:650}
+  button.primary {background:var(--accent);color:#0b211a;border-color:var(--accent)}
+  button:enabled:hover {border-color:var(--accent)}
   button:disabled {opacity:.65;cursor:default}
-  li {padding:.35rem 0}
-  .status {min-height:1.3em}
-  [hidden] {display:none}
-  @media(max-width:680px){main{grid-template-columns:1fr}}
+  :focus-visible {outline:2px solid var(--accent);outline-offset:3px}
+  .actions {display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;margin-top:.8rem}
+  .call-state {margin:1rem 0;padding:.8rem 1rem;background:#0d1a21;border-left:2px solid var(--accent);overflow-wrap:anywhere}
+  .call-state p {margin:0}
+  .call-state small,.meta {color:var(--muted);font-size:.82rem}
+  .stack + .stack {border-top:1px solid var(--border);padding-top:1rem;margin-top:1rem}
+  ol,ul {padding:0;margin:.75rem 0 0;list-style:none}
+  li {padding:.35rem 0;overflow-wrap:anywhere}
+  .queue-row {display:grid;grid-template-columns:1.7rem 1fr;gap:.65rem;padding:.65rem 0;border-top:1px solid var(--border)}
+  .rank {color:var(--accent);font-size:.8rem;padding-top:.15rem}
+  .queue-row strong,.meta {display:block}
+  #turns li {padding:.55rem .7rem;background:#0d1a21;margin-bottom:.45rem;border-radius:.35rem;line-height:1.45}
+  #turns strong {color:var(--accent);margin-right:.45rem}
+  #status:empty {display:none}
+  [hidden] {display:none!important}
+  @media(max-width:730px){main{grid-template-columns:1fr}}
 </style>
-<h1>Roll Call</h1>
-<p>Simulated manager calls and fire truck dispatch. The displayed phone numbers are fictional.</p>
-<button id="start" type="button">Match and call highest risk</button>
+<header><strong>Roll Call</strong><span>Local simulation</span></header>
+<div class="intro">
+  <h1>Manager call &amp; dispatch</h1>
+  <p>Hear a simulated call, report who needs help, and watch the fire truck assignments change.</p>
+  <div class="actions">
+    <button id="start" class="primary" type="button">Call highest-priority building</button>
+    <button id="sample" type="button">Load sample report</button>
+  </div>
+</div>
 <main>
   <section>
     <h2>Manager call</h2>
-    <p id="call" class="status" role="status">Start the simulation to call a building manager.</p>
+    <div class="call-state" aria-live="polite">
+      <p id="call">Ready to start a simulated call.</p>
+      <small id="phone">Use fictional reports only. This demo does not dial.</small>
+    </div>
     <form id="report" hidden>
       <label for="count">People who need help</label><input id="count" type="number" min="1" max="100" value="5" required>
       <label for="transcript">Manager report</label>
       <textarea id="transcript" maxlength="500" rows="3" placeholder="Unit 3B needs help with stairs." required></textarea>
-      <button id="dictate" type="button">Dictate</button>
-      <button>Send report</button>
+      <div class="actions">
+        <button class="primary">Send report</button>
+        <button id="dictate" type="button">Dictate</button>
+      </div>
     </form>
-    <p id="status" class="status" role="status"></p>
+    <div id="audio" class="actions" hidden><button id="replay" type="button">Replay agent</button></div>
+    <p id="status" role="status"></p>
     <ol id="turns" aria-label="Call transcript"></ol>
   </section>
   <section>
-    <h2>Priority queue</h2>
-    <ol id="queue"></ol>
-    <form id="additional" hidden>
-      <label for="building">Additional manager</label><select id="building"></select>
-      <button>Simulate call</button>
-    </form>
-    <h2>Truck assignments</h2>
-    <ul id="assignments"></ul>
-    <h2>Notifications</h2>
-    <ul id="notifications"></ul>
+    <div class="stack">
+      <h2>Priority queue</h2>
+      <ol id="queue"></ol>
+      <form id="additional" class="actions" hidden>
+        <label for="building">Choose manager</label><select id="building"></select>
+        <button>Start simulated call</button>
+      </form>
+    </div>
+    <div class="stack"><h2>Truck assignments</h2><ul id="assignments"></ul></div>
+    <div id="updates" class="stack" hidden><h2>Dispatch updates</h2><ul id="notifications"></ul></div>
   </section>
 </main>
 <script>
   const element = id => document.getElementById(id);
   let callId;
   let dictation;
-  function items(id, strings) {
-    element(id).replaceChildren(...strings.map(text => {
+  let lastReply;
+  function items(id, values, makeRow) {
+    element(id).replaceChildren(...values.map((value, index) => {
       const li = document.createElement("li");
-      li.textContent = text;
+      if (makeRow) makeRow(li, value, index);
+      else li.textContent = value;
       return li;
     }));
   }
   function speak(text) {
     const speech = window.speechSynthesis;
     const voice = speech?.getVoices().find(candidate => candidate.localService && candidate.lang.startsWith("en"));
-    if (!voice || !text) return;
+    if (!voice || !text) return false;
     speech.cancel();
     const reply = new SpeechSynthesisUtterance(text);
     reply.voice = voice;
     speech.speak(reply);
+    return true;
   }
   async function post(path, values) {
     const response = await fetch(path, {
@@ -82,36 +117,74 @@
     return data;
   }
   function render(data) {
-    callId = data.call_id;
     const names = Object.fromEntries(data.queue.map(building => [building.id, building.name]));
-    element("call").textContent = "Simulated call to " + data.destination.name + " · " + data.destination.phone;
-    items("turns", data.transcript.map(turn => turn.speaker + ": " + turn.text));
-    items("queue", data.queue.map(building =>
-      building.name + " · " + building.people_need_help_est + " need help · fire ETA " + building.fire_arrival_min + " min"
-    ));
+    items("queue", data.queue, (li, building, index) => {
+      const rank = document.createElement("span");
+      const details = document.createElement("div");
+      const title = document.createElement("strong");
+      const info = document.createElement("span");
+      rank.className = "rank";
+      rank.textContent = String(index + 1).padStart(2, "0");
+      title.textContent = building.name;
+      info.className = "meta";
+      info.textContent = building.people_need_help_est + " need help · fire ETA " + building.fire_arrival_min + " min";
+      details.append(title, info);
+      li.className = "queue-row";
+      li.append(rank, details);
+    });
     items("assignments", data.assignments.map(item => item.truck_id + " → " + names[item.building_id]));
-    items("notifications", (data.actions || []).filter(action => action.type === "notify")
-      .map(action => (names[action.id] || action.id) + ": " + action.message));
     element("building").replaceChildren(...data.queue.map(building => new Option(building.name, building.id)));
     element("additional").hidden = false;
+
+    if (!data.call_id) return;
+    callId = data.call_id;
+    element("call").textContent = (data.actions ? "Report received · " : "Simulated call to ") + data.destination.name;
+    element("phone").textContent = "Fictional test line " + data.destination.phone;
+    items("turns", data.transcript, (li, turn) => {
+      const speaker = document.createElement("strong");
+      speaker.textContent = turn.speaker === "agent" ? "Agent" : "Manager";
+      li.append(speaker, document.createTextNode(turn.text));
+    });
+    const updates = (data.actions || []).filter(action => action.type === "notify")
+      .map(action => (names[action.id] || action.id) + ": " + action.message);
+    items("notifications", updates);
+    element("updates").hidden = !updates.length;
     element("report").hidden = Boolean(data.actions);
+    element("audio").hidden = false;
     const lastAgent = data.transcript.filter(turn => turn.speaker === "agent").at(-1);
-    speak(data.actions
+    lastReply = data.actions
       ? data.residents_needing_help.map(need => "Help requested for unit " + need.unit + ".").join(" ") + " Assignments updated."
-      : lastAgent?.text);
+      : lastAgent?.text;
+    speak(lastReply);
   }
-  async function perform(operation) {
+  async function perform(operation, after) {
     const buttons = document.querySelectorAll("button");
     for (const button of buttons) button.disabled = true;
     element("status").textContent = "";
-    try { render(await operation()); }
+    if (dictation) {
+      dictation.onresult = dictation.onerror = dictation.onend = null;
+      dictation.abort();
+      dictation = null;
+    }
+    try { render(await operation()); after?.(); }
     catch (error) { element("status").textContent = error.message; }
     finally { for (const button of buttons) button.disabled = false; }
   }
-  element("start").onclick = () => perform(() => post("/start", {}));
+  function begin(buildingId, sample = false) {
+    perform(() => post("/start", {building_id: buildingId}), () => {
+      element("count").value = sample ? 8 : 5;
+      element("transcript").value = sample ? "Unit 3B needs help with stairs." : "";
+      element("transcript").focus();
+    });
+  }
+  element("start").onclick = () => begin();
+  element("sample").onclick = () => begin("magnolia", true);
   element("additional").onsubmit = event => {
     event.preventDefault();
-    perform(() => post("/start", {building_id: element("building").value}));
+    begin(element("building").value);
+  };
+  element("replay").onclick = () => {
+    if (!speak(lastReply)) element("status").textContent = "A local English voice is unavailable. Read the transcript below.";
   };
   element("report").onsubmit = event => {
     event.preventDefault();
@@ -123,23 +196,34 @@
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     dictation = Recognition ? new Recognition() : null;
     if (!dictation || !("processLocally" in dictation)) {
+      dictation = null;
       element("status").textContent = "On-device dictation is unavailable. Type the report instead.";
       return;
     }
     dictation.processLocally = true;
     dictation.lang = "en-US";
-    dictation.onresult = event => { element("transcript").value = event.results[0][0].transcript; };
+    dictation.onresult = event => {
+      element("transcript").value = event.results[0][0].transcript;
+      element("status").textContent = "Review the transcript before sending.";
+    };
     dictation.onerror = () => {
       element("status").textContent = "Check microphone permission and the local English speech pack, or type the report.";
     };
-    dictation.onend = () => { element("dictate").disabled = false; };
+    dictation.onend = () => { dictation = null; element("dictate").disabled = false; };
     try {
+      window.speechSynthesis?.cancel();
       dictation.start();
       element("dictate").disabled = true;
       element("status").textContent = "Listening for the manager report.";
     } catch {
+      dictation = null;
       element("status").textContent = "Could not start dictation. You can type the report.";
     }
   };
+  perform(async () => {
+    const response = await fetch("/state");
+    if (!response.ok) throw new Error("Could not load the demo queue.");
+    return response.json();
+  });
 </script>
 </html>

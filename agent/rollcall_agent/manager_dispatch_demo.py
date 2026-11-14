@@ -1,5 +1,6 @@
 """Run a local, fictional call and dispatch exercise without provider credentials."""
 
+import argparse
 import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -7,6 +8,8 @@ from importlib.resources import files
 from math import hypot
 from threading import Lock
 from uuid import uuid4
+
+from langsmith import tracing_context
 
 from rollcall_agent.dispatch import handle_event
 from rollcall_agent.manager_call import run_manager_call
@@ -147,14 +150,15 @@ def submit_report(call_id, count, transcript):
             None,
         )
         responder = {"id": assigned["truck_id"] if assigned else "Roll Call dispatch"}
-        call = run_manager_call(
-            target,
-            responder,
-            {"disaster_type": "fire"},
-            simulated_residents=(
-                {"unit": parsed[1].upper(), "need": parsed[2].strip(" .")},
-            ),
-        )
+        with tracing_context(enabled=False):
+            call = run_manager_call(
+                target,
+                responder,
+                {"disaster_type": "fire"},
+                simulated_residents=(
+                    {"unit": parsed[1].upper(), "need": parsed[2].strip(" .")},
+                ),
+            )
         event = {
             "type": "tenant_stuck",
             "building_id": building_id,
@@ -180,6 +184,11 @@ class DemoHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'",
+        )
         self.end_headers()
         self.wfile.write(body)
 
@@ -187,6 +196,9 @@ class DemoHandler(BaseHTTPRequestHandler):
         self.send_content(json.dumps(payload).encode(), "application/json", status)
 
     def do_GET(self):
+        if self.path == "/state":
+            self.send_json(present(initial_state()))
+            return
         if self.path != "/":
             self.send_error(404)
             return
@@ -198,6 +210,17 @@ class DemoHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path not in ("/start", "/report"):
             self.send_error(404)
+            return
+        origin = self.headers.get("Origin")
+        port = self.server.server_port
+        if origin and origin not in (
+            f"http://127.0.0.1:{port}",
+            f"http://localhost:{port}",
+        ):
+            self.send_json({"error": "Open the demo on localhost."}, 403)
+            return
+        if self.headers.get_content_type() != "application/json":
+            self.send_json({"error": "Expected a JSON request."}, 415)
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -220,6 +243,12 @@ class DemoHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    with ThreadingHTTPServer(("127.0.0.1", 3022), DemoHandler) as server:
-        print("Manager dispatch demo at http://127.0.0.1:3022", flush=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=3022)
+    args = parser.parse_args()
+    with ThreadingHTTPServer(("127.0.0.1", args.port), DemoHandler) as server:
+        print(
+            f"Manager dispatch demo at http://127.0.0.1:{server.server_port}",
+            flush=True,
+        )
         server.serve_forever()
