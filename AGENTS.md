@@ -67,6 +67,18 @@ Event messages are short and factual, one to five lines. Write them for an agent
 7. If you discovered follow-up work, create issues (`gh issue create`, labeled `status:ready` plus an area label), then `coord post NOTE`. If you're blocked for more than 10 min, post `BLOCKED` or `NEED` and switch to another issue.
 8. Go to step 1. Never sit idle. If the board is empty, post `NOTE` and write issues for testing, polish, or demo prep.
 
+**Keep the shared docs current.** `AGENTS.md`, `CONTRACTS.md` and `DATABASE.md` change during the day. In step 1,
+in step 4, and before you answer your human about how something works, run:
+
+```
+git fetch origin main && git log --oneline <last commit you checked>..origin/main -- AGENTS.md CONTRACTS.md DATABASE.md
+```
+
+If it prints a commit, read the changed file again from `origin/main` (`git show origin/main:<file>`) before you
+continue, and follow the new version. Remember the commit you checked (`git rev-parse origin/main`) for next time.
+An agent only runs when it has a turn, so a human who wants this checked without asking can start the agent with
+`/loop` (it then repeats the loop by itself).
+
 Note on step 6: this repo has no branch protection, so `gh pr merge --auto` would merge at once without
 waiting for CI. Always wait for green checks first, as the command in step 6 does. Merge only on green.
 
