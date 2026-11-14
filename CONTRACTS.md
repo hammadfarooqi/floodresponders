@@ -68,6 +68,18 @@ The exploration work (probes, pipeline, maps) lives on branch `hammad_1` (`data/
 | LAFD stations (public) | truck start points | - |
 | Phone calls (agent) | who needs help, driver availability | live |
 
+Facts about the sponsor data that every area should know (details and more in `DATABASE.md`):
+
+- **The CoStar kit is a fixed list, not the whole city:** 3,339 commercial properties (2,765 are apartment
+  communities) and 1,867 homes, across Houston and Los Angeles. A building that is not on the list has no CoStar data.
+- **Every phone number and email in the CoStar kit is fake** (555 numbers). The agent cannot reach a real manager
+  with them. Real calls in the demo go to our own phones.
+- **A missing CoStar value means "not known", not "no".** For example, sprinklers are known for about 1 in 5 properties.
+- **CoStar amenity lists are ids with no name table** in the kit, so we cannot use them.
+- **Vexcel describes shapes, not addresses.** It gives an outline, ground elevation, roof and a type guess for every
+  structure, and no address, name or parcel number. Its computed height is noisy.
+- **Vexcel is fast for whole areas:** one call returns up to 500 parcels, and the Hollywood plan area took 129 calls.
+
 **This repo is public.** Never commit files that contain CoStar, Vexcel or Matterport data, or files made from them.
 Demo data is generated on each machine by the pipeline (needs the keys and the CoStar kit), or loaded from Supabase.
 
