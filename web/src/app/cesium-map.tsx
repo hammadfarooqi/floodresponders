@@ -96,7 +96,7 @@ export default function CesiumMap({
             outlineColor: color,
           },
           label: {
-            text: building.demoRisk ? demoScore(building.demoRisk).toFixed(1) : "–",
+            text: demoScore(building.demoRisk).toFixed(1),
             font: "600 15px sans-serif",
             fillColor: color,
             backgroundColor: Color.fromCssColorString("#10212d"),

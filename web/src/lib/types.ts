@@ -28,5 +28,5 @@ export interface DemoRisk {
 
 export type MapBuilding = Pick<Building, "id" | "name" | "lat" | "lng" | "height_m"> & {
   footprint?: Position[];
-  demoRisk?: DemoRisk;
+  demoRisk: DemoRisk;
 };
