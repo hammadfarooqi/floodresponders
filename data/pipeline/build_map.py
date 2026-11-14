@@ -159,7 +159,26 @@ def main():
         "plan_area": json.loads((BOUNDS / "la_community_plan_areas.geojson").read_text()),
         "neighborhood": json.loads((BOUNDS / "la_county_csa.geojson").read_text()),
     }}
-    for layer in regions["la"].values():  # keep only the name properties the map needs
+    fires = []
+    for fname, ykey in (("la_calfire_perimeters.geojson", "YEAR_"), ("la_recent_fire_perimeters.geojson", None)):
+        for f in json.loads((BOUNDS / fname).read_text())["features"]:
+            p = f["properties"]
+            if ykey:
+                year = int(p.get(ykey) or 0)
+                name, acres = p.get("FIRE_NAME"), p.get("GIS_ACRES")
+            else:
+                t = p.get("attr_FireDiscoveryDateTime")
+                year = __import__("datetime").datetime.utcfromtimestamp(t / 1000).year if t else 0
+                name, acres = p.get("poly_IncidentName"), p.get("poly_GISAcres")
+                if year < 2024:
+                    continue
+            if f.get("geometry"):
+                f["properties"] = {"name": f"{(name or 'Unnamed').title()} {year}", "year": year, "acres": round(acres or 0)}
+                fires.append(f)
+    regions["la"]["fires"] = {"type": "FeatureCollection", "features": fires}
+    for key, layer in regions["la"].items():  # keep only the name properties the map needs
+        if key == "fires":
+            continue
         for f in layer["features"]:
             p = f["properties"]
             f["properties"] = {"name": (p.get("NAME_ALF") or p.get("LABEL") or p.get("CITY_NAME") or "").strip()}
