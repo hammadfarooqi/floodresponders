@@ -49,7 +49,7 @@ saved; do not present "who was trapped" statistics that only follow from our own
 | `api/` | Python, FastAPI, Pydantic models, pytest, ruff |
 | `agent/` | Python, LangChain Deep Agents (`deepagents` package). LLM provider: TBD |
 | Voice or phone for the call | TBD (human decision) |
-| Storage | Supabase: hosted Postgres with PostGIS turned on, project `Responder0`, region us-east-1. It has no tables yet. The schema is TBD and will be added to this file. Until then, code keeps reading the JSON files in `data/` |
+| Storage | Supabase: hosted Postgres with PostGIS, project `Responder0`, region us-east-1. Building tables are loaded (see "Database" below and `DATABASE.md`). Code that reads the JSON files in `data/demo/` keeps working; moving it to Supabase is a separate step |
 | Hosting | TBD. Local demo is the default |
 
 ## Data sources
@@ -151,6 +151,23 @@ in the browser; the API serves data and runs matching and the agent.
 
 Errors: HTTP status plus `{ "detail": string }` (the FastAPI default).
 
+## Database (Supabase)
+
+Schema: `data/db/schema.sql`. Import: `data/db/load_supabase.py`. **Read `DATABASE.md` before you use the
+database:** it lists how each value is chosen and the known data problems.
+
+| Table or view | One row is | Key columns |
+|---|---|---|
+| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect` |
+| `costar_properties` (300) | One CoStar property, with CoStar's own values | `costar_id`, `name`, `address`, `floors`, `total_units`, `is_walkup`, `passenger_elevators`, `matterport_model_ids` |
+| `contacts` (436) | Site office or property manager of a CoStar property | `costar_id`, `role`, `company_name`, `phone`, `is_test_number` |
+| `buildings_geojson` | `buildings` plus `footprint_geojson` | Use this to draw outlines |
+| `buildings_near(p_lat, p_lng, radius_m)` | Function: buildings near a point, nearest first | |
+
+Row security is on with no rules: only `SUPABASE_SECRET_KEY` (server code) can read or write.
+`DemoBuilding` above is still the shape the API serves. `DATABASE.md` lists where the database differs from it
+(area, floor height, no Assessor data yet).
+
 ## Agent interface (draft)
 
 `agent/` is a Python package named `rollcall_agent`. The API installs it with `pip install -e ../agent`.
@@ -174,6 +191,7 @@ How the manager side of the call is produced (real phone call, voice in the brow
 | `SUPABASE_URL` | api, data | Supabase project URL. Ask Rasul for the value |
 | `SUPABASE_SECRET_KEY` | api, data | Full read and write access, skips row security. Server code and import scripts only. Never in `web/`, never in a `NEXT_PUBLIC_` variable |
 | `SUPABASE_PUBLISHABLE_KEY` | web (later) | Key that is safe in a browser. It can read a table only after that table has a row security rule. Not needed while the web app reads through the API |
+| `SUPABASE_PROJECT_REF`, `SUPABASE_ACCESS_TOKEN` | data | Only for `data/db/load_supabase.py --apply-schema` (it runs `schema.sql`). The access token has full account access: `.env` only |
 | LLM provider key | agent | TBD, name depends on the provider |
 | Voice or phone provider keys | agent | TBD |
 | `MATTERPORT_API_KEY`, `MATTERPORT_API_TOKEN`, `MATTERPORT_SDK_KEY`, `VEXCEL_API_KEY`, `COSTAR_KIT_ZIP_PASSWORD` | data | Sponsor keys, in the root `.env`. CoStar data is a local kit at `data/costar-kit/`, not an API. Probes and pipeline: branch `hammad_1`, `data/README.md` |
@@ -189,5 +207,6 @@ web/      Next.js app
 api/      FastAPI app, package `app`, tests in api/tests, deps in api/requirements.txt
 agent/    package `rollcall_agent`, tests in agent/tests, deps in agent/requirements.txt
 data/     pipeline scripts (branch hammad_1 for now); data/demo/ = generated demo files, gitignored
+          data/db/ = Supabase schema and import script (see DATABASE.md)
 tools/    coord, coord_smoke.sh
 ```
