@@ -102,8 +102,13 @@ FireTimeline {                       # data/demo/fire_timeline.json
   fronts: [GeoJSON Polygon]          # burned area at each step
 }
 
-Station { id: string, name: string, lat: number, lng: number }      # data/demo/stations.json (public)
-RoadGraph { nodes: [[lng, lat]], edges: [[from, to, meters]] }      # data/demo/roads.json (public, OSM)
+Station { id: string, name: string, number: int, lat: number, lng: number,
+          node: int }                # nearest road node    # data/demo/stations.json (OSM): 11 LAFD stations
+RoadGraph {                          # data/demo/roads.json (OSM, ODbL). Undirected: trucks ignore one-way rules
+  nodes: [[lng, lat]]
+  edges: [[from, to, meters, fire_min]]   # fire_min: minute the fire closes this edge, or null
+  building_node: { building_id: node }    # nearest road node for every DemoBuilding
+}
 
 Truck {
   id: string, station_id: string
