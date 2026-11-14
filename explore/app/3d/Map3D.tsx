@@ -26,6 +26,7 @@ function style(base: keyof typeof BASES): StyleSpecification {
       dem_shade: { type: "raster-dem", tiles: [TERRAIN], encoding: "terrarium", tileSize: 256, maxzoom: 15 },
       buildings: { type: "geojson", data: "/api/demo/buildings_map.geojson" },
       evac: { type: "geojson", data: "/api/demo/sunset_fire_2025_evacuation.geojson" },
+      fire: { type: "geojson", data: "/api/demo/fire_cells.geojson" },
     },
     layers: [
       { id: "base", type: "raster", source: "base" },
@@ -37,6 +38,8 @@ function style(base: keyof typeof BASES): StyleSpecification {
       { id: "evac-line", type: "line", source: "evac",
         paint: { "line-color": ["case", ["==", ["slice", ["get", "name"], 0, 9], "Mandatory"], "#c2261d", "#eb6834"],
                  "line-width": 3, "line-dasharray": [2, 1.5] } },
+      { id: "fire", type: "fill", source: "fire", filter: ["<=", ["get", "t"], 0],
+        paint: { "fill-color": "#7a2a10", "fill-opacity": 0.75 } },
       { id: "buildings", type: "fill-extrusion", source: "buildings",
         paint: { "fill-extrusion-color": USE_COLORS as never, "fill-extrusion-height": ["get", "h"],
                  "fill-extrusion-base": 0, "fill-extrusion-opacity": 0.92 } },
@@ -57,6 +60,33 @@ export default function Map3D() {
   const [costar, setCostar] = useState(false);
   const [terrain, setTerrain] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [tMin, setTMin] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const DURATION = 180, RUN_SECONDS = 25;
+
+  // play: the whole fire in RUN_SECONDS
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0, last = performance.now();
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000; last = now;
+      setTMin(t => { const n = Math.min(DURATION, t + dt * DURATION / RUN_SECONDS); if (n >= DURATION) setPlaying(false); return n; });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
+  // fire front and buildings reached, for the current time
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !m.getLayer("fire")) return;
+    m.setFilter("fire", ["<=", ["get", "t"], tMin]);
+    m.setPaintProperty("fire", "fill-color", ["case", [">=", ["get", "t"], tMin - 10], "#ff7a1a", "#5b2310"]);
+    m.setPaintProperty("fire", "fill-opacity", ["case", [">=", ["get", "t"], tMin - 10], 0.85, 0.7]);
+    m.setPaintProperty("buildings", "fill-extrusion-color",
+      ["case", ["all", ["!=", ["get", "fa"], null], ["<=", ["coalesce", ["get", "fa"], 9999], tMin]], "#3a2a22", USE_COLORS] as never);
+  }, [tMin]);
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -120,6 +150,14 @@ export default function Map3D() {
           <button style={btn(base === "satellite")} onClick={() => switchBase(base === "satellite" ? "light" : "satellite")}>
             {base === "satellite" ? "satellite" : "light"} base</button>
           <button style={btn(terrain)} onClick={() => setTerrain(t => !t)}>hills {terrain ? "on" : "off"}</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+          <button style={btn(playing)} onClick={() => { if (tMin >= DURATION) setTMin(0); setPlaying(p => !p); }}>
+            {playing ? "pause" : tMin >= DURATION ? "replay" : "play fire"}</button>
+          <input type="range" min={0} max={DURATION} step={1} value={tMin} style={{ flex: 1 }}
+            onChange={e => { setPlaying(false); setTMin(Number(e.target.value)); }} />
+          <span style={{ fontVariantNumeric: "tabular-nums", fontSize: 13, width: 70 }}>
+            {Math.floor(tMin / 60)}h {String(Math.floor(tMin % 60)).padStart(2, "0")}m</span>
         </div>
       </div>
       <button onClick={() => setCostar(c => !c)} style={{ ...btn(costar), position: "absolute", left: 64, bottom: 28,
