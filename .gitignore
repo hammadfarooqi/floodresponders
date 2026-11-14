@@ -8,3 +8,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+
+# Sponsor data kits: password-protected, too big for GitHub. Each person unzips their own copy here.
+data/costar-kit/
+data/processed/
+data/cache/
