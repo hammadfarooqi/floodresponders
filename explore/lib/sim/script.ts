@@ -56,7 +56,7 @@ export function driverDeclines(sim: Simulation): Line[] {
   sim.rematch(true);
   const notes = notifications(sim, from, t);
   const taker = sim.trucks.find(x => x.building === b.id);
-  if (!taker && sim.approve) lines.push({ t, speaker: "System", text: `New pairing for ${b.label} sent to the dispatcher for approval.` });
+  if (!taker && sim.approvalRequired) lines.push({ t, speaker: "System", text: `New pairing for ${b.label} sent to the dispatcher for approval.` });
   else if (!taker) lines.push({ t, speaker: "System",
     text: `No other truck is free and able to reach ${b.label} before the fire right now (the others are working at buildings). It stays in the queue for the next free truck.` });
   return [...lines, ...notes];
@@ -80,7 +80,7 @@ export function tenantStuck(sim: Simulation): Line[] {
   const sent = sim.trucks.find(tr => tr.building === b.id);
   lines.push(sent
     ? { t, speaker: "Roll Call", to: "Supervisor", text: `${sent.name} is on its way to you, ETA ${mins(sent.eta_min ?? 0)}. I'll call back if that changes.` }
-    : sim.approve
+    : sim.approvalRequired
       ? { t, speaker: "Roll Call", to: "Supervisor", text: `I'm asking the dispatcher to approve a truck for you now. I'll call you back with the ETA.` }
       : { t, speaker: "Roll Call", to: "Supervisor", text: `Every truck is busy right now. You are next in the queue; I'll call you back with an ETA.` });
   return [...lines, ...notes];

@@ -15,15 +15,17 @@ const DURATION = 180;
 const VIEW = { center: [-118.327, 34.0965] as [number, number], zoom: 13.55, pitch: 35, bearing: 0 };
 const SPEEDS = [{ x: 0.25, label: "15×" }, { x: 0.5, label: "30×" }, { x: 1, label: "60×" }];  // sim min per wall second
 type Mode = "auto" | "ask";
-const AUTO_SECONDS = 8;
+const REVIEW_SECONDS = 20;  // auto mode: an applied change stays on screen this long for OK / Undo / Edit
 
-interface Pending extends Proposal { id: number; wall: number; t: number }
+interface Pending extends Proposal { id: number; wall: number; t: number; applied: boolean }
 type FeedItem =
   | { k: "log"; t: number; kind: string; text: string; speaker?: string; truck?: string; building?: string }
   | { k: "call"; t: number; title: string; lines: Line[] }
   | { k: "disp"; t: number; text: string };
 
 let nextId = 1;
+/** Routine call = the AI telling a driver about a new assignment. Inbound and agent-moment calls are not routine. */
+const routine = (f: FeedItem) => f.k === "call" && f.title.startsWith("Roll Call →");
 
 export default function ConsoleView() {
   const el = useRef<HTMLDivElement>(null);
@@ -79,14 +81,27 @@ export default function ConsoleView() {
     if (!d) return;
     const s = new Simulation({ g: d.g, buildings: d.buildings, stations: d.stations }, "ours");
     seedHidden(s);
-    s.approve = proposals => {   // every pairing change goes to the dispatcher first
+    // Every pairing change reaches the dispatcher. "auto": the AI applies it at once and the dispatcher reviews it
+    // (OK / Undo / Edit). "ask": nothing moves until the dispatcher approves.
+    s.approve = proposals => {
+      const out: Proposal[] = [];
       for (const p of proposals) {
         if (p.prev === p.building) continue;
-        pending.current = pending.current.filter(x => x.truck !== p.truck);
-        pending.current.push({ ...p, id: nextId++, wall: performance.now(), t: s.t });
+        if (mode.current === "auto") {
+          out.push(p);
+          pending.current = pending.current.filter(x => x.truck !== p.truck);
+          pending.current.push({ ...p, id: nextId++, wall: performance.now(), t: s.t, applied: true });
+          stats.current.auto++;
+          notifyDriver(s, p);
+        } else {
+          const cur = pending.current.find(x => x.truck === p.truck && !x.applied);
+          if (cur) { if (cur.building === p.building) { cur.eta_min = p.eta_min; cur.reason = p.reason; } continue; } // keep the card the dispatcher is reading
+          pending.current.push({ ...p, id: nextId++, wall: performance.now(), t: s.t, applied: false });
+        }
       }
-      return [];
+      return out;
     };
+    s.approvalRequired = mode.current === "ask";
     sim.current = s;
     pending.current = []; feed.current = []; logSeen.current = 0; callAt.current = null; clock.current = 0;
     stats.current = { approved: 0, rejected: 0, edited: 0, auto: 0 };
@@ -100,7 +115,13 @@ export default function ConsoleView() {
     syncFeed(); draw(); refresh();
   };
 
-  const draw = () => { const s = sim.current; if (s) renderer.current?.draw(s, pending.current); };
+  const draw = () => { const s = sim.current; if (s) renderer.current?.draw(s, pending.current.filter(p => !p.applied)); };
+  const notifyDriver = (s: Simulation, p: Proposal) => {
+    const tr = s.trucks.find(x => x.id === p.truck)!, b = s.byId.get(p.building)!;
+    feed.current.push({ k: "call", t: s.t, title: `Roll Call → ${tr.name}`, lines: [
+      { t: s.t, speaker: "Roll Call", to: tr.name, text: `${tr.name}, new assignment: ${b.label}. About ${Math.round(b.needKnown)} people need help. Fire expected in ${mins(b.fire - s.t)}. ETA ${mins(p.eta_min)}.` },
+      { t: s.t, speaker: "Driver", to: "Roll Call", text: `Copy, ${tr.name} en route to ${b.label}.` }] });
+  };
 
   // copy new engine log entries into the feed (calls are added separately with their transcript)
   const syncFeed = () => {
@@ -119,35 +140,43 @@ export default function ConsoleView() {
 
   // ---------- proposal actions ----------
   const drop = (id: number) => { pending.current = pending.current.filter(p => p.id !== id); };
-  const approve = (p: Pending, how: "approved" | "auto") => {
+  /** Approve a waiting proposal, or say OK to an applied one. */
+  const approve = (p: Pending) => {
     const s = sim.current!;
     drop(p.id);
-    const ok = s.applyProposal(p);
-    stats.current[how === "auto" ? "auto" : "approved"]++;
+    stats.current.approved++;
     const tr = s.trucks.find(x => x.id === p.truck)!, b = s.byId.get(p.building)!;
-    if (how === "approved") disp(`Approved: ${tr.name} → ${b.label}`);
-    if (!ok) disp(`Could not apply ${tr.name} → ${b.label} (truck or building no longer available).`);
-    else feed.current.push({ k: "call", t: s.t, title: `Roll Call → ${tr.name}`, lines: [
-      { t: s.t, speaker: "Roll Call", to: tr.name, text: `${tr.name}, new assignment: ${b.label}. About ${Math.round(b.needKnown)} people need help. Fire expected in ${mins(b.fire - s.t)}. ETA ${mins(tr.eta_min ?? 0)}.` },
-      { t: s.t, speaker: "Driver", to: "Roll Call", text: `Copy, ${tr.name} en route to ${b.label}.` }] });
+    if (p.applied) { disp(`OK: ${tr.name} → ${b.label}`); return; }
+    const ok = s.applyProposal(p);
+    disp(ok ? `Approved: ${tr.name} → ${b.label}` : `Could not apply ${tr.name} → ${b.label} (truck or building no longer available).`);
+    if (ok) notifyDriver(s, p);
     syncFeed();
   };
+  /** Reject a waiting proposal, or undo an applied one. Either way the AI will not pair these two for 10 min. */
   const reject = (p: Pending) => {
     const s = sim.current!;
     drop(p.id); s.veto(p.truck, p.building); stats.current.rejected++;
     const tr = s.trucks.find(x => x.id === p.truck)!, b = s.byId.get(p.building)!;
-    disp(`Rejected: ${tr.name} → ${b.label}. The AI will not propose this pair for 10 min.`);
+    if (p.applied && tr.building === p.building) {
+      s.release(tr.id);
+      feed.current.push({ k: "call", t: s.t, title: `Roll Call → ${tr.name}`, lines: [
+        { t: s.t, speaker: "Roll Call", to: tr.name, text: `${tr.name}, disregard ${b.label}. Stand by for a new assignment.` }] });
+    }
+    disp(`${p.applied ? "Undone" : "Rejected"}: ${tr.name} → ${b.label}. The AI will not pair them again for 10 min.`);
     if (tr.status === "idle") s.rematch(false);
     syncFeed();
   };
   const editTo = (p: Pending, truckId: string) => {
     const s = sim.current!;
     drop(p.id);
-    pending.current = pending.current.filter(x => x.truck !== truckId);
+    pending.current = pending.current.filter(x => x.truck !== truckId || x.applied);
     const tr = s.trucks.find(x => x.id === truckId)!, b = s.byId.get(p.building)!;
+    if (p.applied) { s.veto(p.truck, p.building); s.release(p.truck); }
     const ok = s.applyProposal({ truck: truckId, building: p.building, reason: `Dispatcher edit: ${b.label}.` });
     stats.current.edited++;
     disp(ok ? `Edited: ${tr.name} (not ${p.truck}) → ${b.label}` : `Edit failed: ${tr.name} cannot reach ${b.label}.`);
+    if (ok) notifyDriver(s, { truck: truckId, building: p.building, eta_min: tr.eta_min ?? 0, reason: "", prev: null });
+    s.rematch(false);
     setEditing(null); syncFeed();
   };
 
@@ -223,10 +252,10 @@ export default function ConsoleView() {
       }
       s.advanceTo(target);
       clock.current = target;
-      if (mode.current === "auto")
-        for (const p of [...pending.current]) if ((now - p.wall) / 1000 >= AUTO_SECONDS) approve(p, "auto");
-      // drop proposals that no longer make sense
-      pending.current = pending.current.filter(p => { const b = s.byId.get(p.building); const tr = s.trucks.find(x => x.id === p.truck);
+      // drop review cards that are old or no longer true, and proposals that no longer make sense
+      pending.current = pending.current.filter(p => {
+        const b = s.byId.get(p.building), tr = s.trucks.find(x => x.id === p.truck);
+        if (p.applied) return (now - p.wall) / 1000 < REVIEW_SECONDS && tr?.building === p.building;
         return b && !b.burned && b.needKnown > 0.5 && tr && tr.status !== "unavailable" && tr.building !== p.building; });
       syncFeed(); draw();
       if (now - lastUi > 120 || s.done) { lastUi = now; refresh(); }
@@ -242,7 +271,7 @@ export default function ConsoleView() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
       const top = pending.current[0];
-      if (e.key === "a" && top) { approve(top, "approved"); draw(); refresh(); }
+      if (e.key === "a" && top) { approve(top); draw(); refresh(); }
       if (e.key === "r" && top) { reject(top); draw(); refresh(); }
       if (e.key === " ") { e.preventDefault(); setPlaying(p => !p); }
     };
@@ -271,10 +300,10 @@ export default function ConsoleView() {
   const t = s?.t ?? 0;
   const queue = s ? s.buildings.filter(b => !b.burned && b.needKnown > 0.5).sort((a, b) => s.priority(b) - s.priority(a)).slice(0, 40) : [];
   const assignedTo = (bid: string) => s?.trucks.filter(x => x.building === bid) ?? [];
-  const pendingFor = (bid: string) => pending.current.filter(p => p.building === bid);
+  const pendingFor = (bid: string) => pending.current.filter(p => p.building === bid && !p.applied);
   const feedShown = [...feed.current].reverse().filter(f =>
-    filter === "all" ? true : filter === "calls" ? f.k === "call" : filter === "dispatcher" ? f.k === "disp" :
-    f.k === "log" && ["assign", "reassign", "unassign", "withdraw"].includes(f.kind)).slice(0, 80);
+    filter === "all" ? true : filter === "calls" ? f.k === "call" && !routine(f) : filter === "dispatcher" ? f.k === "disp" :
+    (f.k === "call" && routine(f)) || (f.k === "log" && ["assign", "reassign", "unassign", "withdraw"].includes(f.kind))).slice(0, 300);
   const sb = selBld && s ? s.byId.get(selBld) : null;
   const statusLabel = (tr: Truck) => tr.status === "en_route" ? "ENRT" : tr.status === "on_scene" ? "ONSC" : tr.status === "idle" ? "AVAIL" : "OOS";
 
@@ -294,10 +323,10 @@ export default function ConsoleView() {
         </div>
         <div className="mode">
           AI pairings:
-          <button className={`seg ${modeUi === "auto" ? "on" : ""}`} onClick={() => { mode.current = "auto"; setModeUi("auto"); }}
-            title={`Apply each proposal after ${AUTO_SECONDS} s unless you act`}>auto after {AUTO_SECONDS}s</button>
-          <button className={`seg ${modeUi === "ask" ? "on" : ""}`} onClick={() => { mode.current = "ask"; setModeUi("ask"); }}
-            title="Nothing changes until you approve">ask me</button>
+          <button className={`seg ${modeUi === "auto" ? "on" : ""}`} onClick={() => { mode.current = "auto"; setModeUi("auto"); if (sim.current) sim.current.approvalRequired = false; }}
+            title="The AI applies each pairing at once; you review it (OK / Undo / Edit)">AI applies, I review</button>
+          <button className={`seg ${modeUi === "ask" ? "on" : ""}`} onClick={() => { mode.current = "ask"; setModeUi("ask"); if (sim.current) sim.current.approvalRequired = true; }}
+            title="Nothing changes until you approve">I approve each</button>
         </div>
         {c && <div className="kpis">
           <div><b className="g">{n0(c.evacuated)}</b>evacuated</div>
@@ -312,7 +341,7 @@ export default function ConsoleView() {
         <table><thead><tr><th>Unit</th><th>Stat</th><th>Assignment</th><th>ETA</th></tr></thead><tbody>
           {s?.trucks.map(tr => {
             const b = tr.building ? s.byId.get(tr.building) : null;
-            const pend = pending.current.find(p => p.truck === tr.id);
+            const pend = pending.current.find(p => p.truck === tr.id && !p.applied);
             return (
               <tr key={tr.id} className={selUnit === tr.id ? "sel" : ""} onClick={() => setSelUnit(tr.id)}>
                 <td className="mono">E{tr.station}{s.locks.has(tr.id) && <span className="hold" title="Held by dispatcher">H</span>}</td>
@@ -370,7 +399,7 @@ export default function ConsoleView() {
       {/* right: proposals + live feed */}
       <section className="side">
         <h2>AI proposals <span className="count">{pending.current.length}</span>
-          <span className="dim">{modeUi === "auto" ? `apply after ${AUTO_SECONDS}s` : "waiting for you"} · A approve · R reject</span></h2>
+          <span className="dim">{modeUi === "auto" ? `applied · review ${REVIEW_SECONDS}s` : "waiting for you"} · A ok · R {modeUi === "auto" ? "undo" : "reject"}</span></h2>
         <div className="props">
           {pending.current.length === 0 && <div className="dim small pad">No pairing changes waiting.</div>}
           {pending.current.slice(0, 6).map((p, i) => {
@@ -378,10 +407,10 @@ export default function ConsoleView() {
             const age = (performance.now() - p.wall) / 1000;
             const others = s!.trucks.filter(x => x.id !== p.truck && x.status !== "unavailable");
             return (
-              <div key={p.id} className={`pcard ${i === 0 ? "top" : ""}`} onMouseEnter={() => setSelBld(p.building)}>
-                <div className="pt"><span className="mono">E{tr.station}</span> {pb ? <><s>{pb.label}</s> → </> : "→ "}<b>{b.label}</b></div>
+              <div key={p.id} className={`pcard ${i === 0 ? "top" : ""} ${p.applied ? "applied" : ""}`} onClick={() => setSelBld(p.building)}>
+                <div className="pt">{p.applied ? <span className="pill green">APPLIED</span> : <span className="pill blue">PROPOSED</span>}<span className="mono">E{tr.station}</span> {pb ? <><s>{pb.label}</s> → </> : "→ "}<b>{b.label}</b></div>
                 <div className="why">{p.reason} Fire in {mins(b.fire - t)}. ETA {mins(p.eta_min)}.{pb ? ` Re-match: higher priority than ${pb.label}.` : ""}</div>
-                {modeUi === "auto" && <div className="timer"><div style={{ width: `${Math.min(100, (age / AUTO_SECONDS) * 100)}%` }} /></div>}
+                {p.applied && <div className="timer"><div style={{ width: `${Math.max(0, 100 - (age / REVIEW_SECONDS) * 100)}%` }} /></div>}
                 {editing === p.id ? (
                   <div className="btns">
                     <span className="dim small">Send instead:</span>
@@ -390,8 +419,8 @@ export default function ConsoleView() {
                   </div>
                 ) : (
                   <div className="btns">
-                    <button className="ok" onClick={() => { approve(p, "approved"); draw(); refresh(); }}>Approve</button>
-                    <button className="no" onClick={() => { reject(p); draw(); refresh(); }}>Reject</button>
+                    <button className="ok" onClick={() => { approve(p); draw(); refresh(); }}>{p.applied ? "OK" : "Approve"}</button>
+                    <button className="no" onClick={() => { reject(p); draw(); refresh(); }}>{p.applied ? "Undo" : "Reject"}</button>
                     <button onClick={() => setEditing(p.id)}>Edit unit…</button>
                   </div>)}
               </div>);
@@ -403,7 +432,7 @@ export default function ConsoleView() {
         </h2>
         <div className="feed">
           {feedShown.map((f, i) => f.k === "call" ? (
-            <details key={i} className="call" open={i < 2}>
+            <details key={i} className={`call ${routine(f) ? "" : "inbound"}`} open={i < 2 || !routine(f)}>
               <summary><span className="tm">{fmtT(f.t)}</span><span className="pill blue">CALL</span> {f.title}</summary>
               {f.lines.map((l, j) => <div key={j} className={`tl ${l.speaker.replace(" ", "")}`}><b>{l.speaker}{l.to ? ` → ${l.to}` : ""}:</b> {l.text}</div>)}
               {f.title.startsWith("Roll Call →") || f.title.startsWith("Callback") ? null : <div className="dim small">Scripted demo words; the effect on the simulation is real.</div>}
@@ -448,7 +477,7 @@ export default function ConsoleView() {
           {["E27 out 20", "hold E35", "send E41 to Lanewood", "stuck 2 at Franklin Plaza"].map(x => <button key={x} onClick={() => { run(x); draw(); }}>{x}</button>)}
         </div>
         <div className="stats dim small">
-          Approved {stats.current.approved} · auto {stats.current.auto} · rejected {stats.current.rejected} · edited {stats.current.edited}
+          AI applied {stats.current.auto} · you approved/OK {stats.current.approved} · rejected/undone {stats.current.rejected} · edited {stats.current.edited}
           <br />Simulation with labeled assumptions (see /sim); calls are scripted. Not a count of real lives.
         </div>
       </section>
@@ -505,8 +534,10 @@ const CSS = `
 .props{max-height:46%;overflow:auto;padding:6px;display:flex;flex-direction:column;gap:6px;border-bottom:1px solid var(--line)}
 .pcard{border:1px solid #1f3b57;border-left:3px solid var(--blue);border-radius:5px;padding:6px 8px;background:#0c1626}
 .pcard.top{box-shadow:0 0 0 1px var(--blue) inset}
+.pcard.applied{border-color:#14532d;border-left-color:var(--green)}.pcard.applied.top{box-shadow:0 0 0 1px var(--green) inset}
+.pill.green{background:#14532d;color:#bbf7d0}
 .pcard s{color:var(--dim)}.why{color:#aab6cc;font-size:11.5px;margin-top:2px}
-.timer{height:2px;background:#1e2a3f;margin-top:5px}.timer div{height:100%;background:var(--blue)}
+.timer{height:2px;background:#1e2a3f;margin-top:5px}.timer div{height:100%;background:var(--green)}
 .feed{flex:1;overflow:auto;padding:4px 8px}
 .ev{padding:3px 0;border-bottom:1px solid #ffffff08;color:#b9c4d8;cursor:pointer}
 .ev.reassign{color:#fde68a}.ev.withdraw,.ev.unassign{color:#fca5a5}.ev.arrive{color:#86efac}.ev.event{color:#c4b5fd}
@@ -515,6 +546,7 @@ const CSS = `
 .pill.red{background:#7f1d1d;color:#fecaca}.pill.blue{background:#0c4a6e;color:#bae6fd}.pill.amber{background:#78350f;color:#fde68a}
 .call{border:1px solid var(--line);border-radius:5px;margin:4px 0;padding:4px 6px;background:#0c1424}
 .call summary{cursor:pointer}
+.call.inbound{border-color:#5b21b6;background:#140f2a}
 .tl{margin:4px 0 0 8px;padding-left:6px;border-left:2px solid var(--amber)}
 .tl.Driver{border-left-color:#60a5fa}.tl.Supervisor{border-left-color:var(--purple)}.tl.System{border-left-color:#71717a}
 .ev.disp{color:#fde68a}

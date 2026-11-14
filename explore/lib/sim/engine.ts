@@ -110,6 +110,8 @@ export class Simulation {
   private speedMpm: number;
   /** Optional hook: the console can veto or edit AI pairings before they apply. */
   approve?: (proposals: Proposal[]) => Proposal[];
+  /** True when pairings wait for a dispatcher's approval (console "I approve each" mode). Used for call wording. */
+  approvalRequired = false;
   /** Dispatcher holds: a truck locked to a building (or held out) is not re-matched by the AI. */
   locks = new Map<string, string | null>();
   /** Pairings the dispatcher rejected: "truck|building" -> sim minute until which the AI will not propose it again. */
@@ -433,6 +435,12 @@ export class Simulation {
     const tr = this.trucks.find(x => x.id === truckId);
     if (!tr || tr.status !== "unavailable") return;
     tr.unavailable_until = this.t;
+  }
+
+  /** Take a truck off its building (dispatcher undo); the AI may give it new work at the next match. */
+  release(truckId: string) {
+    const tr = this.trucks.find(x => x.id === truckId);
+    if (tr && (tr.status === "en_route" || tr.status === "on_scene")) this.free(tr);
   }
 
   veto(truckId: string, buildingId: string, minutes = 10) {
