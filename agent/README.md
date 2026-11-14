@@ -41,3 +41,21 @@ Each call uses a fictional 555 number and a temporary ID. The demo parses the un
 Dictation requires on-device recognition and a local English speech pack. Replies play through an English system voice when available. Reports can also be typed.
 
 The standalone demo uses its own matcher. To integrate with the app, pass the shared matching function to `rollcall_agent.dispatch.handle_event(state, event, match=...)`. The caller supplies buildings, trucks, and current assignments.
+
+## Real phone test with Twilio
+
+Install from the repository root with `python -m pip install -e "./agent[voice]"`. In your shell set `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` to your own Programmable Voice account and caller number. Expose
+local port 3023 through an HTTPS tunnel and set `ROLLCALL_VOICE_BASE_URL` to its public origin. The server verifies
+Twilio's signature on every webhook. A trial account may require a verified destination.
+
+Run one test call to a number you control or whose owner agreed to the test:
+
+```sh
+python -m rollcall_agent.phone_call --to YOUR_TEST_NUMBER_IN_E164_FORMAT
+```
+
+When the call answers, try “Two people. Unit 3B needs help with stairs.” Twilio transcribes the response
+and speaks the confirmation. The CLI outputs the count, unit, and kind of help as JSON. If a field is
+missing, the call asks once more. The telephone path uses local field extraction for a quick reply.
+It doesn't record the call, store the raw transcript, or dispatch a responder.
