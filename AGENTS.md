@@ -52,6 +52,10 @@ Event messages are short and factual, one to five lines. Write them for an agent
 Note on step 6: this repo has no branch protection, so `gh pr merge --auto` would merge at once without
 waiting for CI. Always wait for green checks first, as the command in step 6 does. Merge only on green.
 
+If every CI job fails in a few seconds with "account is locked due to a billing issue", GitHub Actions is
+down for this repo (see issue #27) and no code is at fault. In that case only: run the checks from the
+Checks section on your machine, write the result in the PR, then `gh pr merge --squash --delete-branch`.
+
 ## Work areas
 
 | Area label | Paths | What is there |
