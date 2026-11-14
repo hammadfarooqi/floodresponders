@@ -14,6 +14,9 @@ button { font: inherit; }
 p { color: #a8b9c8; }
 .dashboard-header p { margin: 6px 0 0; }
 .source { font-size: .85rem; border: 1px solid #40546a; border-radius: 6px; padding: 8px 12px; }
+.demo-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: .85rem; }
+.demo-controls .source { margin: 0; }
+.demo-controls select { border: 1px solid #40546a; border-radius: 6px; padding: 8px; background: #142332; color: inherit; font: inherit; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 310px); gap: 16px; align-items: start; }
 .map-panel, .sidebar { border: 1px solid #304459; border-radius: 10px; background: #142332; overflow: hidden; }
 .map-view { position: relative; height: clamp(360px, 67vh, 680px); background: #182937; }
