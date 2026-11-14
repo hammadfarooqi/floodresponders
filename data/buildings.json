@@ -1,0 +1,2306 @@
+[
+  {
+    "id": "sample-building-01",
+    "name": "Juniper Apartments 1",
+    "address": "100 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.3352,
+    "footprint": [
+      [
+        -118.33535,
+        34.09838
+      ],
+      [
+        -118.33505,
+        34.09838
+      ],
+      [
+        -118.33505,
+        34.09862
+      ],
+      [
+        -118.33535,
+        34.09862
+      ],
+      [
+        -118.33535,
+        34.09838
+      ]
+    ],
+    "height_m": 7.5,
+    "elevation_m": 86.7,
+    "roof_condition": "good",
+    "property_type": "residential",
+    "units": 4,
+    "tenants": 4,
+    "floors": 2,
+    "elevators": 0,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 01",
+      "phone": "+13235550101"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 1,
+      "fire_escapes": 0,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-02",
+    "name": "Juniper Senior Living 2",
+    "address": "110 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.334,
+    "footprint": [
+      [
+        -118.33415,
+        34.09838
+      ],
+      [
+        -118.33385,
+        34.09838
+      ],
+      [
+        -118.33385,
+        34.09862
+      ],
+      [
+        -118.33415,
+        34.09862
+      ],
+      [
+        -118.33415,
+        34.09838
+      ]
+    ],
+    "height_m": 14.4,
+    "elevation_m": 88.9,
+    "roof_condition": "poor",
+    "property_type": "senior_housing",
+    "units": 24,
+    "tenants": 120,
+    "floors": 4,
+    "elevators": 1,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 02",
+      "phone": "+13235550102"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 3,
+      "fire_escapes": 0,
+      "ladder_windows": 2
+    }
+  },
+  {
+    "id": "sample-building-03",
+    "name": "Juniper Office Center 3",
+    "address": "120 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.3328,
+    "footprint": [
+      [
+        -118.33295,
+        34.09838
+      ],
+      [
+        -118.33265,
+        34.09838
+      ],
+      [
+        -118.33265,
+        34.09862
+      ],
+      [
+        -118.33295,
+        34.09862
+      ],
+      [
+        -118.33295,
+        34.09838
+      ]
+    ],
+    "height_m": 22.9,
+    "elevation_m": 86.5,
+    "roof_condition": "fair",
+    "property_type": "commercial",
+    "units": 28,
+    "tenants": 28,
+    "floors": 7,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 03",
+      "phone": "+13235550103"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 1,
+      "ladder_windows": 9
+    }
+  },
+  {
+    "id": "sample-building-04",
+    "name": "Juniper Market Lofts 4",
+    "address": "130 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.3316,
+    "footprint": [
+      [
+        -118.33175,
+        34.09838
+      ],
+      [
+        -118.33145,
+        34.09838
+      ],
+      [
+        -118.33145,
+        34.09862
+      ],
+      [
+        -118.33175,
+        34.09862
+      ],
+      [
+        -118.33175,
+        34.09838
+      ]
+    ],
+    "height_m": 15.2,
+    "elevation_m": 88.2,
+    "roof_condition": "good",
+    "property_type": "mixed",
+    "units": 40,
+    "tenants": 160,
+    "floors": 5,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 04",
+      "phone": "+13235550104"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 3,
+      "fire_escapes": 2,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-05",
+    "name": "Juniper Apartments 5",
+    "address": "140 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.3304,
+    "footprint": [
+      [
+        -118.33055,
+        34.09838
+      ],
+      [
+        -118.33025,
+        34.09838
+      ],
+      [
+        -118.33025,
+        34.09862
+      ],
+      [
+        -118.33055,
+        34.09862
+      ],
+      [
+        -118.33055,
+        34.09838
+      ]
+    ],
+    "height_m": 7.3,
+    "elevation_m": 90.4,
+    "roof_condition": "good",
+    "property_type": "residential",
+    "units": 4,
+    "tenants": 8,
+    "floors": 2,
+    "elevators": 0,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 05",
+      "phone": "+13235550105"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 4,
+      "fire_escapes": 2,
+      "ladder_windows": 5
+    }
+  },
+  {
+    "id": "sample-building-06",
+    "name": "Juniper Senior Living 6",
+    "address": "150 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.3292,
+    "footprint": [
+      [
+        -118.32935,
+        34.09838
+      ],
+      [
+        -118.32905,
+        34.09838
+      ],
+      [
+        -118.32905,
+        34.09862
+      ],
+      [
+        -118.32935,
+        34.09862
+      ],
+      [
+        -118.32935,
+        34.09838
+      ]
+    ],
+    "height_m": 10.1,
+    "elevation_m": 89.7,
+    "roof_condition": "poor",
+    "property_type": "senior_housing",
+    "units": 12,
+    "tenants": 12,
+    "floors": 3,
+    "elevators": 0,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 06",
+      "phone": "+13235550106"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 4,
+      "fire_escapes": 1,
+      "ladder_windows": 4
+    }
+  },
+  {
+    "id": "sample-building-07",
+    "name": "Juniper Office Center 7",
+    "address": "160 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.328,
+    "footprint": [
+      [
+        -118.32815,
+        34.09838
+      ],
+      [
+        -118.32785,
+        34.09838
+      ],
+      [
+        -118.32785,
+        34.09862
+      ],
+      [
+        -118.32815,
+        34.09862
+      ],
+      [
+        -118.32815,
+        34.09838
+      ]
+    ],
+    "height_m": 33.2,
+    "elevation_m": 90.9,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 27,
+    "tenants": 54,
+    "floors": 9,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 07",
+      "phone": "+13235550107"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 3,
+      "fire_escapes": 0,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-08",
+    "name": "Juniper Market Lofts 8",
+    "address": "170 Fictional Juniper Way",
+    "lat": 34.0985,
+    "lng": -118.3268,
+    "footprint": [
+      [
+        -118.32695,
+        34.09838
+      ],
+      [
+        -118.32665,
+        34.09838
+      ],
+      [
+        -118.32665,
+        34.09862
+      ],
+      [
+        -118.32695,
+        34.09862
+      ],
+      [
+        -118.32695,
+        34.09838
+      ]
+    ],
+    "height_m": 33.1,
+    "elevation_m": 89.6,
+    "roof_condition": "fair",
+    "property_type": "mixed",
+    "units": 70,
+    "tenants": 280,
+    "floors": 10,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 08",
+      "phone": "+13235550108"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 8
+    }
+  },
+  {
+    "id": "sample-building-09",
+    "name": "Sycamore Senior Living 1",
+    "address": "100 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.3352,
+    "footprint": [
+      [
+        -118.33535,
+        34.09938
+      ],
+      [
+        -118.33505,
+        34.09938
+      ],
+      [
+        -118.33505,
+        34.09962
+      ],
+      [
+        -118.33535,
+        34.09962
+      ],
+      [
+        -118.33535,
+        34.09938
+      ]
+    ],
+    "height_m": 33.7,
+    "elevation_m": 97.0,
+    "roof_condition": "poor",
+    "property_type": "senior_housing",
+    "units": 36,
+    "tenants": 144,
+    "floors": 9,
+    "elevators": 2,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 09",
+      "phone": "+13235550109"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 4,
+      "fire_escapes": 0,
+      "ladder_windows": 0
+    }
+  },
+  {
+    "id": "sample-building-10",
+    "name": "Sycamore Office Center 2",
+    "address": "110 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.334,
+    "footprint": [
+      [
+        -118.33415,
+        34.09938
+      ],
+      [
+        -118.33385,
+        34.09938
+      ],
+      [
+        -118.33385,
+        34.09962
+      ],
+      [
+        -118.33415,
+        34.09962
+      ],
+      [
+        -118.33415,
+        34.09938
+      ]
+    ],
+    "height_m": 7.3,
+    "elevation_m": 99.5,
+    "roof_condition": "fair",
+    "property_type": "commercial",
+    "units": 6,
+    "tenants": 30,
+    "floors": 2,
+    "elevators": 0,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 10",
+      "phone": "+13235550110"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 4,
+      "fire_escapes": 2,
+      "ladder_windows": 4
+    }
+  },
+  {
+    "id": "sample-building-11",
+    "name": "Sycamore Market Lofts 3",
+    "address": "120 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.3328,
+    "footprint": [
+      [
+        -118.33295,
+        34.09938
+      ],
+      [
+        -118.33265,
+        34.09938
+      ],
+      [
+        -118.33265,
+        34.09962
+      ],
+      [
+        -118.33295,
+        34.09962
+      ],
+      [
+        -118.33295,
+        34.09938
+      ]
+    ],
+    "height_m": 35.5,
+    "elevation_m": 98.8,
+    "roof_condition": "good",
+    "property_type": "mixed",
+    "units": 72,
+    "tenants": 360,
+    "floors": 9,
+    "elevators": 2,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 11",
+      "phone": "+13235550111"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 1,
+      "ladder_windows": 2
+    }
+  },
+  {
+    "id": "sample-building-12",
+    "name": "Sycamore Apartments 4",
+    "address": "130 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.3316,
+    "footprint": [
+      [
+        -118.33175,
+        34.09938
+      ],
+      [
+        -118.33145,
+        34.09938
+      ],
+      [
+        -118.33145,
+        34.09962
+      ],
+      [
+        -118.33175,
+        34.09962
+      ],
+      [
+        -118.33175,
+        34.09938
+      ]
+    ],
+    "height_m": 31.6,
+    "elevation_m": 100.1,
+    "roof_condition": "fair",
+    "property_type": "residential",
+    "units": 16,
+    "tenants": 80,
+    "floors": 8,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 12",
+      "phone": "+13235550112"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 3,
+      "fire_escapes": 2,
+      "ladder_windows": 8
+    }
+  },
+  {
+    "id": "sample-building-13",
+    "name": "Sycamore Senior Living 5",
+    "address": "140 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.3304,
+    "footprint": [
+      [
+        -118.33055,
+        34.09938
+      ],
+      [
+        -118.33025,
+        34.09938
+      ],
+      [
+        -118.33025,
+        34.09962
+      ],
+      [
+        -118.33055,
+        34.09962
+      ],
+      [
+        -118.33055,
+        34.09938
+      ]
+    ],
+    "height_m": 31.5,
+    "elevation_m": 99.3,
+    "roof_condition": "poor",
+    "property_type": "senior_housing",
+    "units": 30,
+    "tenants": 150,
+    "floors": 10,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 13",
+      "phone": "+13235550113"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 1,
+      "fire_escapes": 0,
+      "ladder_windows": 5
+    }
+  },
+  {
+    "id": "sample-building-14",
+    "name": "Sycamore Office Center 6",
+    "address": "150 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.3292,
+    "footprint": [
+      [
+        -118.32935,
+        34.09938
+      ],
+      [
+        -118.32905,
+        34.09938
+      ],
+      [
+        -118.32905,
+        34.09962
+      ],
+      [
+        -118.32935,
+        34.09962
+      ],
+      [
+        -118.32935,
+        34.09938
+      ]
+    ],
+    "height_m": 15.3,
+    "elevation_m": 100.1,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 15,
+    "tenants": 15,
+    "floors": 5,
+    "elevators": 3,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 14",
+      "phone": "+13235550114"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 2,
+      "fire_escapes": 0,
+      "ladder_windows": 10
+    }
+  },
+  {
+    "id": "sample-building-15",
+    "name": "Sycamore Market Lofts 7",
+    "address": "160 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.328,
+    "footprint": [
+      [
+        -118.32815,
+        34.09938
+      ],
+      [
+        -118.32785,
+        34.09938
+      ],
+      [
+        -118.32785,
+        34.09962
+      ],
+      [
+        -118.32815,
+        34.09962
+      ],
+      [
+        -118.32815,
+        34.09938
+      ]
+    ],
+    "height_m": 25.3,
+    "elevation_m": 97.7,
+    "roof_condition": "poor",
+    "property_type": "mixed",
+    "units": 48,
+    "tenants": 192,
+    "floors": 8,
+    "elevators": 1,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 15",
+      "phone": "+13235550115"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 3,
+      "fire_escapes": 1,
+      "ladder_windows": 10
+    }
+  },
+  {
+    "id": "sample-building-16",
+    "name": "Sycamore Apartments 8",
+    "address": "170 Fictional Sycamore Way",
+    "lat": 34.0995,
+    "lng": -118.3268,
+    "footprint": [
+      [
+        -118.32695,
+        34.09938
+      ],
+      [
+        -118.32665,
+        34.09938
+      ],
+      [
+        -118.32665,
+        34.09962
+      ],
+      [
+        -118.32695,
+        34.09962
+      ],
+      [
+        -118.32695,
+        34.09938
+      ]
+    ],
+    "height_m": 23.4,
+    "elevation_m": 97.2,
+    "roof_condition": "good",
+    "property_type": "residential",
+    "units": 30,
+    "tenants": 60,
+    "floors": 6,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 16",
+      "phone": "+13235550116"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-17",
+    "name": "Birch Office Center 1",
+    "address": "100 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.3352,
+    "footprint": [
+      [
+        -118.33535,
+        34.10038
+      ],
+      [
+        -118.33505,
+        34.10038
+      ],
+      [
+        -118.33505,
+        34.10062
+      ],
+      [
+        -118.33535,
+        34.10062
+      ],
+      [
+        -118.33535,
+        34.10038
+      ]
+    ],
+    "height_m": 3.7,
+    "elevation_m": 103.4,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 2,
+    "tenants": 2,
+    "floors": 1,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 17",
+      "phone": "+13235550117"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 2,
+      "fire_escapes": 1,
+      "ladder_windows": 10
+    }
+  },
+  {
+    "id": "sample-building-18",
+    "name": "Birch Market Lofts 2",
+    "address": "110 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.334,
+    "footprint": [
+      [
+        -118.33415,
+        34.10038
+      ],
+      [
+        -118.33385,
+        34.10038
+      ],
+      [
+        -118.33385,
+        34.10062
+      ],
+      [
+        -118.33415,
+        34.10062
+      ],
+      [
+        -118.33415,
+        34.10038
+      ]
+    ],
+    "height_m": 28.3,
+    "elevation_m": 108.1,
+    "roof_condition": "poor",
+    "property_type": "mixed",
+    "units": 24,
+    "tenants": 120,
+    "floors": 8,
+    "elevators": 2,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 18",
+      "phone": "+13235550118"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 4,
+      "fire_escapes": 0,
+      "ladder_windows": 1
+    }
+  },
+  {
+    "id": "sample-building-19",
+    "name": "Birch Apartments 3",
+    "address": "120 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.3328,
+    "footprint": [
+      [
+        -118.33295,
+        34.10038
+      ],
+      [
+        -118.33265,
+        34.10038
+      ],
+      [
+        -118.33265,
+        34.10062
+      ],
+      [
+        -118.33295,
+        34.10062
+      ],
+      [
+        -118.33295,
+        34.10038
+      ]
+    ],
+    "height_m": 6.9,
+    "elevation_m": 106.0,
+    "roof_condition": "fair",
+    "property_type": "residential",
+    "units": 14,
+    "tenants": 14,
+    "floors": 2,
+    "elevators": 0,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 19",
+      "phone": "+13235550119"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 3,
+      "fire_escapes": 0,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-20",
+    "name": "Birch Senior Living 4",
+    "address": "130 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.3316,
+    "footprint": [
+      [
+        -118.33175,
+        34.10038
+      ],
+      [
+        -118.33145,
+        34.10038
+      ],
+      [
+        -118.33145,
+        34.10062
+      ],
+      [
+        -118.33175,
+        34.10062
+      ],
+      [
+        -118.33175,
+        34.10038
+      ]
+    ],
+    "height_m": 14.1,
+    "elevation_m": 104.0,
+    "roof_condition": "good",
+    "property_type": "senior_housing",
+    "units": 12,
+    "tenants": 36,
+    "floors": 4,
+    "elevators": 1,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 20",
+      "phone": "+13235550120"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 4,
+      "fire_escapes": 2,
+      "ladder_windows": 1
+    }
+  },
+  {
+    "id": "sample-building-21",
+    "name": "Birch Office Center 5",
+    "address": "140 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.3304,
+    "footprint": [
+      [
+        -118.33055,
+        34.10038
+      ],
+      [
+        -118.33025,
+        34.10038
+      ],
+      [
+        -118.33025,
+        34.10062
+      ],
+      [
+        -118.33055,
+        34.10062
+      ],
+      [
+        -118.33055,
+        34.10038
+      ]
+    ],
+    "height_m": 4.0,
+    "elevation_m": 108.9,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 7,
+    "tenants": 14,
+    "floors": 1,
+    "elevators": 0,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 21",
+      "phone": "+13235550121"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 4,
+      "fire_escapes": 0,
+      "ladder_windows": 6
+    }
+  },
+  {
+    "id": "sample-building-22",
+    "name": "Birch Market Lofts 6",
+    "address": "150 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.3292,
+    "footprint": [
+      [
+        -118.32935,
+        34.10038
+      ],
+      [
+        -118.32905,
+        34.10038
+      ],
+      [
+        -118.32905,
+        34.10062
+      ],
+      [
+        -118.32935,
+        34.10062
+      ],
+      [
+        -118.32935,
+        34.10038
+      ]
+    ],
+    "height_m": 3.4,
+    "elevation_m": 109.9,
+    "roof_condition": "fair",
+    "property_type": "mixed",
+    "units": 3,
+    "tenants": 12,
+    "floors": 1,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 22",
+      "phone": "+13235550122"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 4,
+      "fire_escapes": 0,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-23",
+    "name": "Birch Apartments 7",
+    "address": "160 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.328,
+    "footprint": [
+      [
+        -118.32815,
+        34.10038
+      ],
+      [
+        -118.32785,
+        34.10038
+      ],
+      [
+        -118.32785,
+        34.10062
+      ],
+      [
+        -118.32815,
+        34.10062
+      ],
+      [
+        -118.32815,
+        34.10038
+      ]
+    ],
+    "height_m": 19.8,
+    "elevation_m": 107.1,
+    "roof_condition": "poor",
+    "property_type": "residential",
+    "units": 15,
+    "tenants": 15,
+    "floors": 5,
+    "elevators": 3,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 23",
+      "phone": "+13235550123"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 1,
+      "fire_escapes": 2,
+      "ladder_windows": 7
+    }
+  },
+  {
+    "id": "sample-building-24",
+    "name": "Birch Senior Living 8",
+    "address": "170 Fictional Birch Way",
+    "lat": 34.1005,
+    "lng": -118.3268,
+    "footprint": [
+      [
+        -118.32695,
+        34.10038
+      ],
+      [
+        -118.32665,
+        34.10038
+      ],
+      [
+        -118.32665,
+        34.10062
+      ],
+      [
+        -118.32695,
+        34.10062
+      ],
+      [
+        -118.32695,
+        34.10038
+      ]
+    ],
+    "height_m": 31.8,
+    "elevation_m": 103.4,
+    "roof_condition": "poor",
+    "property_type": "senior_housing",
+    "units": 72,
+    "tenants": 72,
+    "floors": 9,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 24",
+      "phone": "+13235550124"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 1,
+      "fire_escapes": 2,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-25",
+    "name": "Pine Market Lofts 1",
+    "address": "100 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.3352,
+    "footprint": [
+      [
+        -118.33535,
+        34.10138
+      ],
+      [
+        -118.33505,
+        34.10138
+      ],
+      [
+        -118.33505,
+        34.10162
+      ],
+      [
+        -118.33535,
+        34.10162
+      ],
+      [
+        -118.33535,
+        34.10138
+      ]
+    ],
+    "height_m": 27.6,
+    "elevation_m": 116.0,
+    "roof_condition": "poor",
+    "property_type": "mixed",
+    "units": 14,
+    "tenants": 70,
+    "floors": 7,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 25",
+      "phone": "+13235550125"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 3,
+      "fire_escapes": 1,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-26",
+    "name": "Pine Apartments 2",
+    "address": "110 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.334,
+    "footprint": [
+      [
+        -118.33415,
+        34.10138
+      ],
+      [
+        -118.33385,
+        34.10138
+      ],
+      [
+        -118.33385,
+        34.10162
+      ],
+      [
+        -118.33415,
+        34.10162
+      ],
+      [
+        -118.33415,
+        34.10138
+      ]
+    ],
+    "height_m": 19.6,
+    "elevation_m": 112.9,
+    "roof_condition": "poor",
+    "property_type": "residential",
+    "units": 18,
+    "tenants": 54,
+    "floors": 6,
+    "elevators": 2,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 26",
+      "phone": "+13235550126"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 1,
+      "fire_escapes": 1,
+      "ladder_windows": 9
+    }
+  },
+  {
+    "id": "sample-building-27",
+    "name": "Pine Senior Living 3",
+    "address": "120 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.3328,
+    "footprint": [
+      [
+        -118.33295,
+        34.10138
+      ],
+      [
+        -118.33265,
+        34.10138
+      ],
+      [
+        -118.33265,
+        34.10162
+      ],
+      [
+        -118.33295,
+        34.10162
+      ],
+      [
+        -118.33295,
+        34.10138
+      ]
+    ],
+    "height_m": 30.7,
+    "elevation_m": 113.5,
+    "roof_condition": "fair",
+    "property_type": "senior_housing",
+    "units": 20,
+    "tenants": 40,
+    "floors": 10,
+    "elevators": 2,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 27",
+      "phone": "+13235550127"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 1,
+      "ladder_windows": 2
+    }
+  },
+  {
+    "id": "sample-building-28",
+    "name": "Pine Office Center 4",
+    "address": "130 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.3316,
+    "footprint": [
+      [
+        -118.33175,
+        34.10138
+      ],
+      [
+        -118.33145,
+        34.10138
+      ],
+      [
+        -118.33145,
+        34.10162
+      ],
+      [
+        -118.33175,
+        34.10162
+      ],
+      [
+        -118.33175,
+        34.10138
+      ]
+    ],
+    "height_m": 28.3,
+    "elevation_m": 114.1,
+    "roof_condition": "poor",
+    "property_type": "commercial",
+    "units": 64,
+    "tenants": 320,
+    "floors": 8,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 28",
+      "phone": "+13235550128"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 1,
+      "fire_escapes": 0,
+      "ladder_windows": 4
+    }
+  },
+  {
+    "id": "sample-building-29",
+    "name": "Pine Market Lofts 5",
+    "address": "140 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.3304,
+    "footprint": [
+      [
+        -118.33055,
+        34.10138
+      ],
+      [
+        -118.33025,
+        34.10138
+      ],
+      [
+        -118.33025,
+        34.10162
+      ],
+      [
+        -118.33055,
+        34.10162
+      ],
+      [
+        -118.33055,
+        34.10138
+      ]
+    ],
+    "height_m": 7.5,
+    "elevation_m": 113.1,
+    "roof_condition": "fair",
+    "property_type": "mixed",
+    "units": 4,
+    "tenants": 20,
+    "floors": 2,
+    "elevators": 0,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 29",
+      "phone": "+13235550129"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 2,
+      "ladder_windows": 7
+    }
+  },
+  {
+    "id": "sample-building-30",
+    "name": "Pine Apartments 6",
+    "address": "150 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.3292,
+    "footprint": [
+      [
+        -118.32935,
+        34.10138
+      ],
+      [
+        -118.32905,
+        34.10138
+      ],
+      [
+        -118.32905,
+        34.10162
+      ],
+      [
+        -118.32935,
+        34.10162
+      ],
+      [
+        -118.32935,
+        34.10138
+      ]
+    ],
+    "height_m": 15.3,
+    "elevation_m": 116.4,
+    "roof_condition": "fair",
+    "property_type": "residential",
+    "units": 40,
+    "tenants": 40,
+    "floors": 5,
+    "elevators": 1,
+    "construction_type": "steel",
+    "manager": {
+      "name": "Sample Manager 30",
+      "phone": "+13235550130"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 0,
+      "ladder_windows": 7
+    }
+  },
+  {
+    "id": "sample-building-31",
+    "name": "Pine Senior Living 7",
+    "address": "160 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.328,
+    "footprint": [
+      [
+        -118.32815,
+        34.10138
+      ],
+      [
+        -118.32785,
+        34.10138
+      ],
+      [
+        -118.32785,
+        34.10162
+      ],
+      [
+        -118.32815,
+        34.10162
+      ],
+      [
+        -118.32815,
+        34.10138
+      ]
+    ],
+    "height_m": 30.8,
+    "elevation_m": 112.1,
+    "roof_condition": "good",
+    "property_type": "senior_housing",
+    "units": 63,
+    "tenants": 126,
+    "floors": 9,
+    "elevators": 3,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 31",
+      "phone": "+13235550131"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 2,
+      "fire_escapes": 1,
+      "ladder_windows": 2
+    }
+  },
+  {
+    "id": "sample-building-32",
+    "name": "Pine Office Center 8",
+    "address": "170 Fictional Pine Way",
+    "lat": 34.1015,
+    "lng": -118.3268,
+    "footprint": [
+      [
+        -118.32695,
+        34.10138
+      ],
+      [
+        -118.32665,
+        34.10138
+      ],
+      [
+        -118.32665,
+        34.10162
+      ],
+      [
+        -118.32695,
+        34.10162
+      ],
+      [
+        -118.32695,
+        34.10138
+      ]
+    ],
+    "height_m": 3.4,
+    "elevation_m": 118.5,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 4,
+    "tenants": 12,
+    "floors": 1,
+    "elevators": 0,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 32",
+      "phone": "+13235550132"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 1,
+      "fire_escapes": 1,
+      "ladder_windows": 8
+    }
+  },
+  {
+    "id": "sample-building-33",
+    "name": "Magnolia Apartments 1",
+    "address": "100 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.3352,
+    "footprint": [
+      [
+        -118.33535,
+        34.10238
+      ],
+      [
+        -118.33505,
+        34.10238
+      ],
+      [
+        -118.33505,
+        34.10262
+      ],
+      [
+        -118.33535,
+        34.10262
+      ],
+      [
+        -118.33535,
+        34.10238
+      ]
+    ],
+    "height_m": 26.2,
+    "elevation_m": 127.5,
+    "roof_condition": "good",
+    "property_type": "residential",
+    "units": 42,
+    "tenants": 84,
+    "floors": 7,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 33",
+      "phone": "+13235550133"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 5
+    }
+  },
+  {
+    "id": "sample-building-34",
+    "name": "Magnolia Senior Living 2",
+    "address": "110 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.334,
+    "footprint": [
+      [
+        -118.33415,
+        34.10238
+      ],
+      [
+        -118.33385,
+        34.10238
+      ],
+      [
+        -118.33385,
+        34.10262
+      ],
+      [
+        -118.33415,
+        34.10262
+      ],
+      [
+        -118.33415,
+        34.10238
+      ]
+    ],
+    "height_m": 25.7,
+    "elevation_m": 126.1,
+    "roof_condition": "good",
+    "property_type": "senior_housing",
+    "units": 56,
+    "tenants": 168,
+    "floors": 7,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 34",
+      "phone": "+13235550134"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 1,
+      "fire_escapes": 1,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-35",
+    "name": "Magnolia Office Center 3",
+    "address": "120 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.3328,
+    "footprint": [
+      [
+        -118.33295,
+        34.10238
+      ],
+      [
+        -118.33265,
+        34.10238
+      ],
+      [
+        -118.33265,
+        34.10262
+      ],
+      [
+        -118.33295,
+        34.10262
+      ],
+      [
+        -118.33295,
+        34.10238
+      ]
+    ],
+    "height_m": 15.7,
+    "elevation_m": 123.4,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 32,
+    "tenants": 64,
+    "floors": 4,
+    "elevators": 0,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 35",
+      "phone": "+13235550135"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 3,
+      "fire_escapes": 1,
+      "ladder_windows": 1
+    }
+  },
+  {
+    "id": "sample-building-36",
+    "name": "Magnolia Market Lofts 4",
+    "address": "130 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.3316,
+    "footprint": [
+      [
+        -118.33175,
+        34.10238
+      ],
+      [
+        -118.33145,
+        34.10238
+      ],
+      [
+        -118.33145,
+        34.10262
+      ],
+      [
+        -118.33175,
+        34.10262
+      ],
+      [
+        -118.33175,
+        34.10238
+      ]
+    ],
+    "height_m": 18.2,
+    "elevation_m": 123.8,
+    "roof_condition": "poor",
+    "property_type": "mixed",
+    "units": 20,
+    "tenants": 60,
+    "floors": 5,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 36",
+      "phone": "+13235550136"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 4
+    }
+  },
+  {
+    "id": "sample-building-37",
+    "name": "Magnolia Apartments 5",
+    "address": "140 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.3304,
+    "footprint": [
+      [
+        -118.33055,
+        34.10238
+      ],
+      [
+        -118.33025,
+        34.10238
+      ],
+      [
+        -118.33025,
+        34.10262
+      ],
+      [
+        -118.33055,
+        34.10262
+      ],
+      [
+        -118.33055,
+        34.10238
+      ]
+    ],
+    "height_m": 3.6,
+    "elevation_m": 123.4,
+    "roof_condition": "fair",
+    "property_type": "residential",
+    "units": 2,
+    "tenants": 8,
+    "floors": 1,
+    "elevators": 0,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 37",
+      "phone": "+13235550137"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 2,
+      "fire_escapes": 1,
+      "ladder_windows": 0
+    }
+  },
+  {
+    "id": "sample-building-38",
+    "name": "Magnolia Senior Living 6",
+    "address": "150 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.3292,
+    "footprint": [
+      [
+        -118.32935,
+        34.10238
+      ],
+      [
+        -118.32905,
+        34.10238
+      ],
+      [
+        -118.32905,
+        34.10262
+      ],
+      [
+        -118.32935,
+        34.10262
+      ],
+      [
+        -118.32935,
+        34.10238
+      ]
+    ],
+    "height_m": 24.6,
+    "elevation_m": 126.6,
+    "roof_condition": "poor",
+    "property_type": "senior_housing",
+    "units": 14,
+    "tenants": 28,
+    "floors": 7,
+    "elevators": 2,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 38",
+      "phone": "+13235550138"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 2,
+      "ladder_windows": 5
+    }
+  },
+  {
+    "id": "sample-building-39",
+    "name": "Magnolia Office Center 7",
+    "address": "160 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.328,
+    "footprint": [
+      [
+        -118.32815,
+        34.10238
+      ],
+      [
+        -118.32785,
+        34.10238
+      ],
+      [
+        -118.32785,
+        34.10262
+      ],
+      [
+        -118.32815,
+        34.10262
+      ],
+      [
+        -118.32815,
+        34.10238
+      ]
+    ],
+    "height_m": 7.8,
+    "elevation_m": 124.5,
+    "roof_condition": "poor",
+    "property_type": "commercial",
+    "units": 14,
+    "tenants": 56,
+    "floors": 2,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 39",
+      "phone": "+13235550139"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 3,
+      "fire_escapes": 2,
+      "ladder_windows": 2
+    }
+  },
+  {
+    "id": "sample-building-40",
+    "name": "Magnolia Market Lofts 8",
+    "address": "170 Fictional Magnolia Way",
+    "lat": 34.1025,
+    "lng": -118.3268,
+    "footprint": [
+      [
+        -118.32695,
+        34.10238
+      ],
+      [
+        -118.32665,
+        34.10238
+      ],
+      [
+        -118.32665,
+        34.10262
+      ],
+      [
+        -118.32695,
+        34.10262
+      ],
+      [
+        -118.32695,
+        34.10238
+      ]
+    ],
+    "height_m": 14.7,
+    "elevation_m": 123.7,
+    "roof_condition": "poor",
+    "property_type": "mixed",
+    "units": 20,
+    "tenants": 40,
+    "floors": 4,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 40",
+      "phone": "+13235550140"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 1,
+      "fire_escapes": 1,
+      "ladder_windows": 4
+    }
+  },
+  {
+    "id": "sample-building-41",
+    "name": "Cypress Senior Living 1",
+    "address": "100 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.3352,
+    "footprint": [
+      [
+        -118.33535,
+        34.10338
+      ],
+      [
+        -118.33505,
+        34.10338
+      ],
+      [
+        -118.33505,
+        34.10362
+      ],
+      [
+        -118.33535,
+        34.10362
+      ],
+      [
+        -118.33535,
+        34.10338
+      ]
+    ],
+    "height_m": 15.1,
+    "elevation_m": 134.2,
+    "roof_condition": "fair",
+    "property_type": "senior_housing",
+    "units": 20,
+    "tenants": 80,
+    "floors": 4,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 41",
+      "phone": "+13235550141"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 7
+    }
+  },
+  {
+    "id": "sample-building-42",
+    "name": "Cypress Office Center 2",
+    "address": "110 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.334,
+    "footprint": [
+      [
+        -118.33415,
+        34.10338
+      ],
+      [
+        -118.33385,
+        34.10338
+      ],
+      [
+        -118.33385,
+        34.10362
+      ],
+      [
+        -118.33415,
+        34.10362
+      ],
+      [
+        -118.33415,
+        34.10338
+      ]
+    ],
+    "height_m": 9.3,
+    "elevation_m": 133.6,
+    "roof_condition": "poor",
+    "property_type": "commercial",
+    "units": 21,
+    "tenants": 105,
+    "floors": 3,
+    "elevators": 1,
+    "construction_type": "wood_frame",
+    "manager": {
+      "name": "Sample Manager 42",
+      "phone": "+13235550142"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 3,
+      "fire_escapes": 0,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-43",
+    "name": "Cypress Market Lofts 3",
+    "address": "120 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.3328,
+    "footprint": [
+      [
+        -118.33295,
+        34.10338
+      ],
+      [
+        -118.33265,
+        34.10338
+      ],
+      [
+        -118.33265,
+        34.10362
+      ],
+      [
+        -118.33295,
+        34.10362
+      ],
+      [
+        -118.33295,
+        34.10338
+      ]
+    ],
+    "height_m": 9.1,
+    "elevation_m": 136.9,
+    "roof_condition": "poor",
+    "property_type": "mixed",
+    "units": 6,
+    "tenants": 6,
+    "floors": 3,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 43",
+      "phone": "+13235550143"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 6
+    }
+  },
+  {
+    "id": "sample-building-44",
+    "name": "Cypress Apartments 4",
+    "address": "130 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.3316,
+    "footprint": [
+      [
+        -118.33175,
+        34.10338
+      ],
+      [
+        -118.33145,
+        34.10338
+      ],
+      [
+        -118.33145,
+        34.10362
+      ],
+      [
+        -118.33175,
+        34.10362
+      ],
+      [
+        -118.33175,
+        34.10338
+      ]
+    ],
+    "height_m": 26.0,
+    "elevation_m": 134.6,
+    "roof_condition": "good",
+    "property_type": "residential",
+    "units": 40,
+    "tenants": 40,
+    "floors": 8,
+    "elevators": 2,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 44",
+      "phone": "+13235550144"
+    },
+    "egress": {
+      "stairwells": 1,
+      "exits": 4,
+      "fire_escapes": 0,
+      "ladder_windows": 8
+    }
+  },
+  {
+    "id": "sample-building-45",
+    "name": "Cypress Senior Living 5",
+    "address": "140 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.3304,
+    "footprint": [
+      [
+        -118.33055,
+        34.10338
+      ],
+      [
+        -118.33025,
+        34.10338
+      ],
+      [
+        -118.33025,
+        34.10362
+      ],
+      [
+        -118.33055,
+        34.10362
+      ],
+      [
+        -118.33055,
+        34.10338
+      ]
+    ],
+    "height_m": 12.5,
+    "elevation_m": 130.9,
+    "roof_condition": "fair",
+    "property_type": "senior_housing",
+    "units": 32,
+    "tenants": 160,
+    "floors": 4,
+    "elevators": 1,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 45",
+      "phone": "+13235550145"
+    },
+    "egress": {
+      "stairwells": 3,
+      "exits": 4,
+      "fire_escapes": 2,
+      "ladder_windows": 7
+    }
+  },
+  {
+    "id": "sample-building-46",
+    "name": "Cypress Office Center 6",
+    "address": "150 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.3292,
+    "footprint": [
+      [
+        -118.32935,
+        34.10338
+      ],
+      [
+        -118.32905,
+        34.10338
+      ],
+      [
+        -118.32905,
+        34.10362
+      ],
+      [
+        -118.32935,
+        34.10362
+      ],
+      [
+        -118.32935,
+        34.10338
+      ]
+    ],
+    "height_m": 11.6,
+    "elevation_m": 133.2,
+    "roof_condition": "good",
+    "property_type": "commercial",
+    "units": 21,
+    "tenants": 63,
+    "floors": 3,
+    "elevators": 1,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 46",
+      "phone": "+13235550146"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 4,
+      "fire_escapes": 0,
+      "ladder_windows": 4
+    }
+  },
+  {
+    "id": "sample-building-47",
+    "name": "Cypress Market Lofts 7",
+    "address": "160 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.328,
+    "footprint": [
+      [
+        -118.32815,
+        34.10338
+      ],
+      [
+        -118.32785,
+        34.10338
+      ],
+      [
+        -118.32785,
+        34.10362
+      ],
+      [
+        -118.32815,
+        34.10362
+      ],
+      [
+        -118.32815,
+        34.10338
+      ]
+    ],
+    "height_m": 13.3,
+    "elevation_m": 136.3,
+    "roof_condition": "good",
+    "property_type": "mixed",
+    "units": 16,
+    "tenants": 32,
+    "floors": 4,
+    "elevators": 0,
+    "construction_type": "masonry",
+    "manager": {
+      "name": "Sample Manager 47",
+      "phone": "+13235550147"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 2,
+      "fire_escapes": 2,
+      "ladder_windows": 3
+    }
+  },
+  {
+    "id": "sample-building-48",
+    "name": "Cypress Apartments 8",
+    "address": "170 Fictional Cypress Way",
+    "lat": 34.1035,
+    "lng": -118.3268,
+    "footprint": [
+      [
+        -118.32695,
+        34.10338
+      ],
+      [
+        -118.32665,
+        34.10338
+      ],
+      [
+        -118.32665,
+        34.10362
+      ],
+      [
+        -118.32695,
+        34.10362
+      ],
+      [
+        -118.32695,
+        34.10338
+      ]
+    ],
+    "height_m": 6.8,
+    "elevation_m": 133.8,
+    "roof_condition": "fair",
+    "property_type": "residential",
+    "units": 10,
+    "tenants": 10,
+    "floors": 2,
+    "elevators": 0,
+    "construction_type": "reinforced_concrete",
+    "manager": {
+      "name": "Sample Manager 48",
+      "phone": "+13235550148"
+    },
+    "egress": {
+      "stairwells": 2,
+      "exits": 1,
+      "fire_escapes": 2,
+      "ladder_windows": 6
+    }
+  }
+]
