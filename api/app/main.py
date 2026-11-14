@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter, ValidationError
 
+from app.match_routes import router as match_router
 from app.mock_data import mock_data
 from app.models import (
     BuildingsResponse,
@@ -74,8 +75,10 @@ def create_app(demo_dir: Path = DEMO_DIR, *, use_mock_data: bool = False) -> Fas
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"http://(?:localhost|127\.0\.0\.1)(?::[0-9]+)?",
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
     )
+    app.include_router(match_router)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
