@@ -26,18 +26,23 @@ function style(base: keyof typeof BASES): StyleSpecification {
       dem_shade: { type: "raster-dem", tiles: [TERRAIN], encoding: "terrarium", tileSize: 256, maxzoom: 15 },
       buildings: { type: "geojson", data: "/api/demo/buildings_map.geojson", promoteId: "id" },
       evac: { type: "geojson", data: "/api/demo/sunset_fire_2025_evacuation.geojson" },
+      evac_whatif: { type: "geojson", data: "/api/demo/evac_whatif.geojson" },
       fire: { type: "geojson", data: "/api/demo/fire_cells.geojson", generateId: true },
     },
     layers: [
       { id: "base", type: "raster", source: "base" },
       { id: "hillshade", type: "hillshade", source: "dem_shade",
         paint: { "hillshade-exaggeration": 0.35, "hillshade-shadow-color": "#3a2f25" } },
-      { id: "evac-fill", type: "fill", source: "evac",
-        paint: { "fill-color": ["case", ["==", ["slice", ["get", "name"], 0, 9], "Mandatory"], "#c2261d", "#eb6834"],
-                 "fill-opacity": 0.12 } },
-      { id: "evac-line", type: "line", source: "evac",
-        paint: { "line-color": ["case", ["==", ["slice", ["get", "name"], 0, 9], "Mandatory"], "#c2261d", "#eb6834"],
-                 "line-width": 3, "line-dasharray": [2, 1.5] } },
+      ...(["evac", "evac_whatif"] as const).flatMap(src => [
+        { id: `${src}-fill`, type: "fill" as const, source: src,
+          layout: { visibility: (src === "evac_whatif" ? "visible" : "none") as "visible" | "none" },
+          paint: { "fill-color": ["case", ["==", ["slice", ["get", "name"], 0, 9], "Mandatory"], "#c2261d", "#eb6834"] as never,
+                   "fill-opacity": 0.12 } },
+        { id: `${src}-line`, type: "line" as const, source: src,
+          layout: { visibility: (src === "evac_whatif" ? "visible" : "none") as "visible" | "none" },
+          paint: { "line-color": ["case", ["==", ["slice", ["get", "name"], 0, 9], "Mandatory"], "#c2261d", "#eb6834"] as never,
+                   "line-width": 3, "line-dasharray": [2, 1.5] } },
+      ]),
       // Fire and burned buildings are driven by feature-state flags set once per cell/building as the clock
       // passes them. Changing paint expressions every frame made MapLibre re-lay out 42k buildings and lag.
       { id: "fire", type: "fill", source: "fire",
@@ -64,6 +69,17 @@ export default function Map3D() {
   const [costar, setCostar] = useState(false);
   const [terrain, setTerrain] = useState(true);
   const [loading, setLoading] = useState(true);
+  // Evacuation areas: "whatif" = wind-shaped areas from our fire model (default), "real" = LAFD Jan 2025
+  const [evac, setEvac] = useState<"whatif" | "real" | "hidden">("whatif");
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const apply = () => {
+      for (const [src, on] of [["evac", evac === "real"], ["evac_whatif", evac === "whatif"]] as const)
+        for (const k of ["fill", "line"]) if (m.getLayer(`${src}-${k}`)) m.setLayoutProperty(`${src}-${k}`, "visibility", on ? "visible" : "none");
+    };
+    if (m.isStyleLoaded()) apply(); else m.once("idle", apply);
+  }, [evac]);
   const [tMin, setTMin] = useState(0);
   const [playing, setPlaying] = useState(false);
   const DURATION = 180, RUN_SECONDS = 25;
@@ -179,7 +195,7 @@ export default function Map3D() {
                     boxShadow: "0 2px 12px #0002", maxWidth: 330 }}>
         <div style={{ fontWeight: 600, fontSize: 15 }}>Roll Call: Hollywood 3D (prototype, #47)</div>
         <div style={{ fontSize: 12, color: "#5c5b57", margin: "2px 0 8px" }}>
-          42,557 real buildings (Vexcel outlines, heights from CoStar or Assessor) on free terrain tiles. Dashed: Sunset Fire 2025 evacuation areas.
+          42,557 real buildings (Vexcel outlines, heights from CoStar or Assessor) on free terrain tiles. Dashed: evacuation areas (red = order, orange = warning).
           {loading && <b> Loading buildings…</b>}
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -187,6 +203,12 @@ export default function Map3D() {
           <button style={btn(base === "satellite")} onClick={() => switchBase(base === "satellite" ? "light" : "satellite")}>
             {base === "satellite" ? "satellite" : "light"} base</button>
           <button style={btn(terrain)} onClick={() => setTerrain(t => !t)}>hills {terrain ? "on" : "off"}</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8, fontSize: 12, color: "#5c5b57" }}>
+          Evacuation areas:
+          {(["whatif", "real", "hidden"] as const).map(v => (
+            <button key={v} style={btn(evac === v)} onClick={() => setEvac(v)}>
+              {v === "whatif" ? "what-if (wind)" : v === "real" ? "real (Jan 2025)" : "hidden"}</button>))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
           <button style={btn(playing)} onClick={() => { if (tMin >= DURATION) setTMin(0); setPlaying(p => !p); }}>

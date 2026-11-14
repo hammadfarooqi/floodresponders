@@ -40,9 +40,74 @@ URBAN_FACTOR = 0.25                   # built-up cells burn at this share of the
 DENSITY_SLOWDOWN = 0.5                # ... and slower as building cover grows
 BRUSH_MAX_COVER = 0.05                # cells with < 5% building cover count as brush
 DURATION_MIN = 180                    # simulated fire length
+ORDER_LEAD_MIN = 45                   # what-if evacuation order: where the fire would reach 45 min later
+WARNING_LEAD_MIN = 120                # what-if evacuation warning: where it would reach 2 h later
+ZONE_LB = 3.0                         # evacuation areas are drawn downwind-heavy: projection uses a longer ellipse
 STEP_MIN = 3                          # one front polygon per step
 CELL_M = 30
 BBOX = (-118.405, 34.083, -118.275, 34.140)   # lon/lat working box
+
+
+def trace_rings(inside, nx, ny, x0, y0, dx, dy, tol_m=25):
+    """Outline of a set of grid cells as closed rings [[lng, lat], ...] (cell sides between in and out), simplified."""
+    from collections import defaultdict
+    nxt = defaultdict(list)
+    for i in range(nx):
+        for j in range(ny):
+            if not inside[i][j]:
+                continue
+            # counter-clockwise edges with the cell on the left; keep sides whose neighbor is outside
+            if j == 0 or not inside[i][j - 1]:
+                nxt[(i, j)].append((i + 1, j))
+            if i == nx - 1 or not inside[i + 1][j]:
+                nxt[(i + 1, j)].append((i + 1, j + 1))
+            if j == ny - 1 or not inside[i][j + 1]:
+                nxt[(i + 1, j + 1)].append((i, j + 1))
+            if i == 0 or not inside[i - 1][j]:
+                nxt[(i, j + 1)].append((i, j))
+    rings = []
+    while nxt:
+        start = next(iter(nxt))
+        ring, cur = [start], start
+        while True:
+            outs = nxt[cur]
+            nv = outs.pop()
+            if not outs:
+                del nxt[cur]
+            cur = nv
+            if cur == start:
+                break
+            ring.append(cur)
+        if len(ring) < 4:
+            continue
+        pts = [[x0 + a * dx, y0 + b * dy] for a, b in ring] + [[x0 + ring[0][0] * dx, y0 + ring[0][1] * dy]]
+        pts = _simplify(pts, tol_m)
+        rings.append([[round(x, 6), round(y, 6)] for x, y in pts])
+    return [r for r in rings if len(r) >= 4]
+
+
+def _simplify(ring, tol_m):
+    kx = 111_320 * math.cos(math.radians(34.1))
+    P = [(x * kx, y * 110_540) for x, y in ring]
+    keep = [False] * len(P)
+    keep[0] = keep[-1] = True
+    st = [(0, len(P) - 1)]
+    while st:
+        a, b = st.pop()
+        (ax, ay), (bx, by) = P[a], P[b]
+        ddx, ddy = bx - ax, by - ay
+        n2 = ddx * ddx + ddy * ddy
+        best, idx = 0.0, -1
+        for k in range(a + 1, b):
+            px, py = P[k]
+            t = max(0, min(1, ((px - ax) * ddx + (py - ay) * ddy) / n2)) if n2 else 0
+            d = math.hypot(px - ax - t * ddx, py - ay - t * ddy)
+            if d > best:
+                best, idx = d, k
+        if best > tol_m:
+            keep[idx] = True
+            st += [(a, idx), (idx, b)]
+    return [p for p, k in zip(ring, keep) if k]
 
 
 def write_atomic(path: Path, obj):
@@ -112,19 +177,25 @@ def main():
     steps = [(a, b) for a in range(-2, 3) for b in range(-2, 3) if (a, b) != (0, 0) and math.gcd(abs(a), abs(b)) == 1]
     edge = [(a, b, CELL_M * math.hypot(a, b), wind_factor(math.degrees(math.atan2(a, b)))) for a, b in steps]
 
-    def arrival(head_m_per_min):
+    def arrival(head_m_per_min, limit_min=DURATION_MIN * 1.6, clip=True, edges=None, seeds=None):
+        edges = edges or edge
         INF = float("inf")
         t = [[INF] * ny for _ in range(nx)]
-        si, sj = cell(ox, oy)
-        t[si][sj] = 0.0
-        pq = [(0.0, si, sj)]
+        if seeds is None:
+            si, sj = cell(ox, oy)
+            seeds = [(0.0, si, sj)]
+        pq = []
+        for d0, si, sj in seeds:
+            t[si][sj] = d0
+            pq.append((d0, si, sj))
+        heapq.heapify(pq)
         while pq:
             d, i, j = heapq.heappop(pq)
-            if d > t[i][j] or d > DURATION_MIN * 1.6:
+            if d > t[i][j] or d > limit_min:
                 continue
-            for a, b, dist, wf in edge:
+            for a, b, dist, wf in edges:
                 ni, nj = i + a, j + b
-                if not (0 <= ni < nx and 0 <= nj < ny) or not allowed[ni][nj]:
+                if not (0 <= ni < nx and 0 <= nj < ny) or (clip and not allowed[ni][nj]):
                     continue
                 rate = head_m_per_min * wf * 0.5 * (fuel(i, j) + fuel(ni, nj))
                 nd = d + dist / rate
@@ -202,6 +273,30 @@ def main():
     write_atomic(DEMO / "building_arrivals.json",
                  sorted(([b["id"], b["fire_arrival_min"]] for b in buildings if b["fire_arrival_min"] is not None),
                         key=lambda x: x[1]))
+
+    # What-if evacuation areas, shaped by the same wind-driven spread: where the fire WOULD reach if it were not
+    # stopped. Order = within ORDER_LEAD_MIN after the end, warning = within WARNING_LEAD_MIN. Not clipped to the
+    # allowed area (orders cover what could burn, not what we chose to show burning).
+    ez = math.sqrt(1 - 1 / ZONE_LB ** 2)
+    zedge = [(a, b, dist, (1 - ez) / (1 - ez * math.cos(math.radians(math.degrees(math.atan2(a, b)) - wind))))
+             for a, b, dist, _ in edge]
+    # Project forward from the fire's perimeter at the end (every burned cell is a seed at DURATION_MIN), with a
+    # downwind-heavy ellipse: the areas contain everything burned plus where the fire would go next.
+    seeds = [(t[i][j], i, j) for i in range(nx) for j in range(ny) if t[i][j] <= DURATION_MIN]
+    seeds = [(max(d, DURATION_MIN), i, j) for d, i, j in seeds]
+    tp = arrival(head, limit_min=DURATION_MIN + WARNING_LEAD_MIN + 5, clip=False, edges=zedge, seeds=seeds)
+    zones = []
+    for name, lead in (("Evacuation warning (what-if)", WARNING_LEAD_MIN), ("Mandatory evacuation order (what-if)", ORDER_LEAD_MIN)):
+        inside = [[tp[i][j] <= DURATION_MIN + lead for j in range(ny)] for i in range(nx)]
+        rings = trace_rings(inside, nx, ny, x0, y0, dx, dy)
+        zones.append({"type": "Feature", "properties": {"name": name, "lead_min": lead,
+                      "note": f"cells the unstopped fire would reach within {lead} min after the {DURATION_MIN}-min mark"},
+                      "geometry": {"type": "MultiPolygon", "coordinates": [[r] for r in rings]}})
+    write_atomic(DEMO / "evac_whatif.geojson", {"type": "FeatureCollection", "features": zones})
+    for z in zones:
+        cells_in = sum(1 for i in range(nx) for j in range(ny) if tp[i][j] <= DURATION_MIN + z["properties"]["lead_min"])
+        bz = sum(1 for b in buildings if (lambda c: 0 <= c[0] < nx and 0 <= c[1] < ny and tp[c[0]][c[1]] <= DURATION_MIN + z["properties"]["lead_min"])(cell(b["lng"], b["lat"])))
+        print(f"{z['properties']['name']}: {cells_in * CELL_M * CELL_M / 4047:,.0f} acres, {bz:,} buildings")
 
     people = sum(b["people_est"] for b in buildings if b["fire_arrival_min"] is not None)
     need = sum(b["people_need_help_est"] for b in buildings if b["fire_arrival_min"] is not None)
