@@ -3,13 +3,16 @@
 import argparse
 import io
 import json
+import os
 import re
 import wave
 from http.server import ThreadingHTTPServer
 from importlib.resources import files
 from pathlib import Path
+from threading import Thread
 
 from rollcall_agent.manager_dispatch_demo import DemoHandler
+from rollcall_agent.telegram_demo import TelegramBot, TelegramError, TelegramExercise
 
 GREETING = (
     "Hi, this is Roll Call dispatch. During this exercise, how many residents need evacuation "
@@ -114,7 +117,7 @@ def reply_to_report(message: str, previous: dict) -> dict:
     need_match = NEED.search(message)
     if need_match:
         details = need_match[1].strip(" .!")
-        if details.lower() not in {
+        if details and details.lower() not in {
             "help",
             "assistance",
             "evacuation assistance",
@@ -171,23 +174,36 @@ def load_dictation(model_dir: Path):
     return transcribe
 
 
-def make_handler(transcribe):
+def make_handler(transcribe, telegram=None):
+    if telegram is None:
+        telegram = TelegramExercise(GREETING, reply_to_report)
+
     class Handler(DemoHandler):
         timeout = 15
+
+        def local_telegram_request(self):
+            port = self.server.server_port
+            if self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}"):
+                return True
+            self.send_json({"error": "Open the dispatcher console on localhost."}, 403)
+            return False
 
         def do_GET(self):
             if self.path == "/session":
                 self.send_json(
                     {"greeting": GREETING, "dictation": transcribe is not None}
                 )
-            elif self.path == "/":
+            elif self.path in ("/", "/?channel=telegram"):
                 page = files("rollcall_agent").joinpath("call_chat.html").read_bytes()
                 self.send_content(page, "text/html; charset=utf-8")
+            elif self.path == "/telegram":
+                if self.local_telegram_request():
+                    self.send_json(telegram.snapshot())
             else:
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in ("/reply", "/dictate"):
+            if self.path not in ("/reply", "/dictate", "/telegram/start", "/telegram/reply"):
                 self.send_error(404)
                 return
             port = self.server.server_port
@@ -200,7 +216,22 @@ def make_handler(transcribe):
                 return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
-                if self.path == "/dictate":
+                if self.path.startswith("/telegram/"):
+                    if not self.local_telegram_request():
+                        return
+                    if self.headers.get_content_type() != "application/json" or not 0 < length <= 4096:
+                        raise ValueError("Invalid Telegram request.")
+                    payload = json.loads(self.rfile.read(length))
+                    if not isinstance(payload, dict):
+                        raise ValueError("Invalid Telegram request.")
+                    if self.path == "/telegram/start":
+                        result = telegram.start()
+                    else:
+                        message = payload.get("message")
+                        if not isinstance(message, str):
+                            raise ValueError("Enter a reply.")
+                        result = telegram.mock_reply(message.strip())
+                elif self.path == "/dictate":
                     if transcribe is None:
                         self.send_json({"error": "Local dictation is not set up."}, 503)
                         return
@@ -230,6 +261,9 @@ def make_handler(transcribe):
             except (ValueError, EOFError, wave.Error) as error:
                 self.send_json({"error": str(error)}, 400)
                 return
+            except TelegramError as error:
+                self.send_json({"error": str(error)}, 502)
+                return
             self.send_json(result)
 
     return Handler
@@ -243,9 +277,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     recognizer = load_dictation(args.model_dir) if args.model_dir else None
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    bot = TelegramBot(token) if token else None
+    telegram = TelegramExercise(GREETING, reply_to_report, bot)
     with ThreadingHTTPServer(
-        ("127.0.0.1", args.port), make_handler(recognizer)
+        ("127.0.0.1", args.port), make_handler(recognizer, telegram)
     ) as server:
+        if bot:
+            Thread(target=telegram.poll, daemon=True).start()
         print(
             f"Dispatcher chat demo: http://127.0.0.1:{server.server_port}", flush=True
         )
