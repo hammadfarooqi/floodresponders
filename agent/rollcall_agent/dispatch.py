@@ -42,6 +42,11 @@ def handle_event(state: dict, event: dict, *, match: Matcher) -> dict:
         item["truck_id"]: item["building_id"] for item in state.get("assignments", [])
     }
     after = {item["truck_id"]: item["building_id"] for item in assignments}
+    after.update(
+        (truck["id"], truck["building_id"])
+        for truck in updated["trucks"]
+        if truck["status"] == "on_scene" and truck.get("building_id") is not None
+    )
     actions = [{"type": "rematch", "assignments": assignments}]
     affected = {building_id}
     for truck_id in sorted(before.keys() | after.keys()):

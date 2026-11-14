@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import TypeAdapter, ValidationError
 
+from app.agent_routes import router as agent_router
 from app.match_routes import router as match_router
 from app.mock_data import mock_data
 from app.models import (
@@ -79,6 +80,7 @@ def create_app(demo_dir: Path = DEMO_DIR, *, use_mock_data: bool = False) -> Fas
         allow_headers=["Content-Type"],
     )
     app.include_router(match_router)
+    app.include_router(agent_router)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
