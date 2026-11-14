@@ -112,6 +112,13 @@ may post `NOTE "taking over stale #N"`, claim the issue, and continue.
 Shared types, API shapes, env vars, and DB schema live in `CONTRACTS.md`. To change one, your PR must
 update `CONTRACTS.md`, and you must post an `INTERFACE` event that names who is affected.
 
+## Database
+
+The building data is in Supabase. Read `DATABASE.md` before you read from or write to it.
+
+**Rule:** when you find a problem, a surprise or a limit in the database or in the data inside it, add it to
+`DATABASE.md` under "Known problems", in the same PR as your work. Never put sponsor data in that file.
+
 ## One folder per agent (the default)
 
 Each agent works in its own folder (a git worktree) that `tools/coord new-agent` makes. Two agents in one
