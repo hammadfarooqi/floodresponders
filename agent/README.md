@@ -42,3 +42,16 @@ Dictation requires on-device recognition and a local English speech pack. Replie
 This demo runs on localhost with a scripted model and tracing disabled. It needs no phone provider or API key, and uses fictional phone numbers. If the default port is taken, pass `--port 3024` to the module.
 
 The standalone demo uses its own matcher. To integrate with the app, pass the shared matching function to `rollcall_agent.dispatch.handle_event(state, event, match=...)`. The caller supplies buildings, trucks, and current assignments.
+
+## Dispatcher call console
+
+Run `python -m rollcall_agent.call_chat` and open `http://127.0.0.1:3025`. Click **Call building manager**.
+Play the manager with fictional details. Try `Two people in unit 3B need help with stairs.` or answer a field at a time.
+The scripted dispatcher asks for missing fields and sends a confirmation to the call transcript and the dispatch report.
+The demo is a local exercise. It does not dial the displayed number or send a real dispatch.
+
+For dictation, install the optional engine with `python -m pip install -e "./agent[local-speech]"` from the repository root.
+Unpack the [small English Vosk model](https://alphacephei.com/vosk/models) and pass
+`--model-dir PATH_TO_UNPACKED_MODEL`. Click **Dictate**, allow the browser to use the microphone, and click
+**Stop recording** when finished. The browser sends the clip to localhost for transcription and prompts you
+to review it before sending. Audio is processed in memory. Downloading the model is a one-time setup.
