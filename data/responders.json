@@ -1,0 +1,74 @@
+[
+  {
+    "id": "sample-responder-01",
+    "kind": "fire",
+    "lat": 34.097991,
+    "lng": -118.335323
+  },
+  {
+    "id": "sample-responder-02",
+    "kind": "police",
+    "lat": 34.097919,
+    "lng": -118.332544
+  },
+  {
+    "id": "sample-responder-03",
+    "kind": "ambulance",
+    "lat": 34.098157,
+    "lng": -118.329366
+  },
+  {
+    "id": "sample-responder-04",
+    "kind": "fire",
+    "lat": 34.098015,
+    "lng": -118.326406
+  },
+  {
+    "id": "sample-responder-05",
+    "kind": "police",
+    "lat": 34.10112,
+    "lng": -118.335341
+  },
+  {
+    "id": "sample-responder-06",
+    "kind": "ambulance",
+    "lat": 34.100995,
+    "lng": -118.332591
+  },
+  {
+    "id": "sample-responder-07",
+    "kind": "fire",
+    "lat": 34.100994,
+    "lng": -118.329544
+  },
+  {
+    "id": "sample-responder-08",
+    "kind": "police",
+    "lat": 34.101068,
+    "lng": -118.326381
+  },
+  {
+    "id": "sample-responder-09",
+    "kind": "ambulance",
+    "lat": 34.10409,
+    "lng": -118.335364
+  },
+  {
+    "id": "sample-responder-10",
+    "kind": "fire",
+    "lat": 34.104168,
+    "lng": -118.332308
+  },
+  {
+    "id": "sample-responder-11",
+    "kind": "police",
+    "lat": 34.104014,
+    "lng": -118.329337
+  },
+  {
+    "id": "sample-responder-12",
+    "kind": "ambulance",
+    "lat": 34.104037,
+    "lng": -118.326435
+  }
+]
