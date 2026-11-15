@@ -33,12 +33,13 @@ DEMO = DATA / "demo"
 BATCH = 10  # scans for each API call
 
 # Geometry is in meters. A position and a wall corner use the same x, y frame (checked on real scans).
+# z of a position is the height of the floor under it. The 3D tour needs it, and the id, to draw the route.
 FIELDS = """name
   floors { id label sequence
     vertices { id position { x y } }
     edges { id type vertices { id } openings { type label width relativeCenter } }
     rooms { id classifications { label confidence } boundary { edges { id } } } }
-  locations { id position { x y } neighbors room { id } floor { id } }"""
+  locations { id position { x y z } neighbors room { id } floor { id } }"""
 
 
 def _r(value: float) -> float:
@@ -122,7 +123,8 @@ def layout_from_model(scan_id: str, model: dict) -> dict:
 
     locations = [loc for loc in model.get("locations") or [] if (loc.get("floor") or {}).get("id") in floor_index]
     index = {loc["id"]: i for i, loc in enumerate(locations)}
-    positions = [{"x": _r(loc["position"]["x"]), "y": _r(loc["position"]["y"]),
+    positions = [{"id": loc["id"], "x": _r(loc["position"]["x"]), "y": _r(loc["position"]["y"]),
+                  "z": _r(loc["position"].get("z") or 0),
                   "floor": floor_index[loc["floor"]["id"]],
                   "room": room_index.get((loc.get("room") or {}).get("id")),
                   "next": [index[n] for n in loc.get("neighbors") or [] if n in index]} for loc in locations]

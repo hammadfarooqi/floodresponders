@@ -50,7 +50,7 @@ def model():
     locations = [
         {"id": "p0", "position": {"x": 7, "y": 2}, "neighbors": ["p1"], "room": {"id": "r-live"}, "floor": {"id": "f1"}},
         {"id": "p1", "position": {"x": 5, "y": 1}, "neighbors": ["p0", "p2", "gone"], "room": {"id": "r-live"}, "floor": {"id": "f1"}},
-        {"id": "p2", "position": {"x": 2, "y": 2}, "neighbors": ["p1"], "room": {"id": "r-bed"}, "floor": {"id": "f1"}},
+        {"id": "p2", "position": {"x": 2, "y": 2, "z": 3.1}, "neighbors": ["p1"], "room": {"id": "r-bed"}, "floor": {"id": "f1"}},
     ]
     return {"name": "Made-up 1BR", "locations": locations,
             "floors": [{"id": "f1", "label": "Floor 1", "sequence": 0, "vertices": vertices, "edges": edges, "rooms": rooms}]}
@@ -103,6 +103,8 @@ class LayoutFromModel(unittest.TestCase):
         self.assertEqual([q["floor"] for q in p], [0, 0, 0])
         self.assertEqual(p[1]["next"], [0, 2])       # the unknown neighbour "gone" is dropped
         self.assertEqual((p[2]["x"], p[2]["y"]), (2, 2))
+        self.assertEqual([q["id"] for q in p], ["p0", "p1", "p2"])
+        self.assertEqual([q["z"] for q in p], [0, 0, 3.1])      # floor height; 0 when the API gives none
 
     def test_summary_counts_bedrooms_that_can_be_reached(self):
         s = summary(self.layout)
