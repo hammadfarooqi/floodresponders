@@ -115,24 +115,33 @@ export function searchRoute(l: Layout, entry: number): SearchRoute {
 export interface Point3 { x: number; y: number; z: number }
 export const toViewer = (p: { x: number; y: number; z: number }): Point3 => ({ x: p.x, y: p.z, z: 0 - p.y });
 
-export interface Route3d {
-  legs: Point3[][];                                  // one line for each stop, on the floor
-  stops: Point3[];                                   // floor point of each stop, in route order
-  start: { sweep: string; yawDeg: number | null };   // stand here; yaw = look along the first step (null = no step)
+/** One camera move of the walk: go to this position and face this way. */
+export interface WalkStep {
+  sweep: string;             // the Matterport id of the position
+  yawDeg: number | null;     // face along the move (first step: along the next move); null = keep the view
+  meters: number;            // length of the move
+  stop: number | null;       // number of the stop that this move reaches (1 = first bedroom), else null
 }
+export interface Route3d {
+  legs: Point3[][];          // one line for each stop, on the floor
+  stops: Point3[];           // floor point of each stop, in route order
+  walk: WalkStep[];          // the camera moves along the whole route; walk[0] is the start
+}
+
+// A camera with yaw 0 looks toward -z; a positive yaw turns it to the left (toward -x).
+const yawFrom = (a: Point3, b: Point3) => Math.round(Math.atan2(-(b.x - a.x), -(b.z - a.z)) * 180 / Math.PI) || 0;
 
 export function routeIn3d(l: Layout, route: SearchRoute): Route3d {
   const at = (i: number) => toViewer(l.positions[i]);
-  const first = route.stops.find(s => s.path.length > 1);
-  let yawDeg: number | null = null;
-  if (first) {
-    const a = at(first.path[0]), b = at(first.path[1]);
-    // A camera with yaw 0 looks toward -z; a positive yaw turns it to the left (toward -x).
-    yawDeg = Math.round(Math.atan2(-(b.x - a.x), -(b.z - a.z)) * 180 / Math.PI) || 0;
-  }
-  return {
-    legs: route.stops.filter(s => s.path.length > 1).map(s => s.path.map(at)),
-    stops: route.stops.map(s => at(s.position)),
-    start: { sweep: l.positions[route.entry].id, yawDeg },
-  };
+  const legs = route.stops.filter(s => s.path.length > 1).map(s => s.path.map(at));
+  const walk: WalkStep[] = [{
+    sweep: l.positions[route.entry].id, yawDeg: legs.length ? yawFrom(legs[0][0], legs[0][1]) : null, meters: 0,
+    stop: route.stops[0]?.path.length === 1 ? 1 : null,
+  }];
+  route.stops.forEach((s, n) => s.path.slice(1).forEach((to, k) => {
+    const a = at(s.path[k]), b = at(to);
+    walk.push({ sweep: l.positions[to].id, yawDeg: yawFrom(a, b), meters: round(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)),
+      stop: k === s.path.length - 2 ? n + 1 : null });
+  }));
+  return { legs, stops: route.stops.map(s => at(s.position)), walk };
 }

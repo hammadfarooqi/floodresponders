@@ -110,15 +110,14 @@ test("routeIn3d gives one line for each stop, a marker at each stop, and where t
   const r = routeIn3d(l, searchRoute(l, 0));
   assert.deepEqual(r.legs, [[{ x: 1, y: 0, z: -1 }, { x: 1, y: 0, z: -5 }, { x: 4, y: 3, z: -5 }]]);
   assert.deepEqual(r.stops, [{ x: 4, y: 3, z: -5 }]);
-  assert.equal(r.start.sweep, "p0");
-  // The first step goes toward tour -z. A camera with yaw 0 looks toward -z, so the yaw is 0.
-  assert.equal(r.start.yawDeg, 0);
+  // The walk starts at the entry. The first step goes toward tour -z. A camera with yaw 0 looks toward -z: yaw 0.
+  assert.deepEqual(r.walk[0], { sweep: "p0", yawDeg: 0, meters: 0, stop: null });
 });
 
 test("routeIn3d: the start looks along the first step of the route", () => {
   // First step toward plan +x = tour +x. Turning the camera to the right is a negative yaw: -90.
   const l = layout([room("Living Room"), room("Bedroom")], [[1, 1, 0], [6, 1, 1]], [[0, 1]]);
-  assert.equal(routeIn3d(l, searchRoute(l, 0)).start.yawDeg, -90);
+  assert.equal(routeIn3d(l, searchRoute(l, 0)).walk[0].yawDeg, -90);
 });
 
 test("routeIn3d: a stop reached with no step (the entry is in the bedroom) has a marker and no line", () => {
@@ -126,5 +125,23 @@ test("routeIn3d: a stop reached with no step (the entry is in the bedroom) has a
   const r = routeIn3d(l, searchRoute(l, 0));
   assert.deepEqual(r.legs, []);
   assert.equal(r.stops.length, 1);
-  assert.equal(r.start.yawDeg, null);
+  assert.deepEqual(r.walk, [{ sweep: "p0", yawDeg: null, meters: 0, stop: 1 }]);
+});
+
+test("routeIn3d: the walk is one camera move for each position of the route, and it faces the way it moves", () => {
+  // FLAT: entry 0 (0,0) -> 1 (2,0) -> 2 (4,0) near bedroom, then back 2 -> 1 -> 3 (2,6) far bedroom.
+  const r = routeIn3d(FLAT(), searchRoute(FLAT(), 0));
+  assert.deepEqual(r.walk, [
+    { sweep: "p0", yawDeg: -90, meters: 0, stop: null },   // stand at the entry, look along the first step (plan +x)
+    { sweep: "p1", yawDeg: -90, meters: 2, stop: null },
+    { sweep: "p2", yawDeg: -90, meters: 2, stop: 1 },      // the first bedroom
+    { sweep: "p1", yawDeg: 90, meters: 2, stop: null },    // back the same way (plan -x)
+    { sweep: "p3", yawDeg: 0, meters: 6, stop: 2 },        // plan +y is tour -z: yaw 0
+  ]);
+});
+
+test("routeIn3d: a move up a floor counts the height in its length", () => {
+  const l = layout([room("Living Room"), room("Bedroom")], [[0, 0, 0], [4, 0, 1]], [[0, 1]]);
+  l.positions[1].z = 3;
+  assert.equal(routeIn3d(l, searchRoute(l, 0)).walk[1].meters, 5);   // 4 m along, 3 m up
 });

@@ -25,8 +25,9 @@ and the scans do not cover hallways or stairs. Only rooms that Matterport labels
 Route inside the 3D tour: run `explore/scripts/get_matterport_bundle.sh` once, then start the dev server again. The
 script downloads Matterport's viewer ("SDK Bundle", 27 MB, not in git) into `public/matterport-bundle/` and copies
 `MATTERPORT_SDK_KEY` from the root `.env` into `explore/.env.local`. The "3D tour" tab then draws the route as a green
-line on the floor, with a numbered sign at each bedroom (`app/interior/Tour3D.tsx`). Without the bundle or the key, the
-tab shows the plain public tour with no line. Our key works on localhost with scans of other accounts (checked
+line on the floor, with a numbered sign at each bedroom (`app/interior/Tour3D.tsx`). The camera then walks along the
+line with no clicks: from the entrance to each bedroom, one full turn in each bedroom, and then again from the start.
+Without the bundle or the key, the tab shows the plain public tour with no line and no walk. Our key works on localhost with scans of other accounts (checked
 2026-11-14); another host name must be added to the key in the Matterport account first.
 
 Result with default assumptions (fire stops at Hollywood Blvd): old way 193 trapped, AI 32 (84% fewer). The AI is
