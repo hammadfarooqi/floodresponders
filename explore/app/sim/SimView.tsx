@@ -247,7 +247,8 @@ export default function SimView() {
         <div className="lh">People walking to safety on the streets</div>
         <div><i className="dot" style={{ background: COLORS.able }} />left on their own, fast (1 dot = {ABLE_PER_DOT})</div>
         <div><i className="dot" style={{ background: COLORS.need }} />needed help, slow (1 dot = {NEED_PER_DOT})</div>
-        <div><i className="truckkey">27</i>engine · dashed line = driving to that building</div>
+        <div><span style={{ marginRight: 6 }}>🚒</span>fire truck (station number) · ladder up = working at a building</div>
+        <div><span style={{ marginRight: 6, letterSpacing: 1 }}>- - -</span>truck driving to that building</div>
         <div><span style={{ marginRight: 6 }}>📞</span>called 911, waiting for a truck</div>
       </div>
 

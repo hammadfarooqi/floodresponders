@@ -87,7 +87,7 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
 
 /** Draws one Simulation on the map. Call reset() when a new Simulation starts, draw() every frame. */
 export class SimRenderer {
-  private markers = new Map<string, { m: maplibregl.Marker; el: HTMLDivElement }>();
+  private markers = new Map<string, { m: maplibregl.Marker; el: HTMLDivElement; lng: number }>();
   private walkers: Walker[] = [];
   private spawned = new Float64Array(0);
   private spawnedNeed = new Float64Array(0);
@@ -141,15 +141,23 @@ export class SimRenderer {
     for (const tr of s.trucks) {
       const e = document.createElement("div");
       e.className = "truck";
-      e.textContent = String(tr.station);
+      e.innerHTML = TRUCK_SVG + `<span class="num">${tr.station}</span>`;
+      e.dataset.status = tr.status;
       e.addEventListener("click", ev => { ev.stopPropagation(); this.onTruckClick?.(tr.id); });
-      const mk = new maplibregl.Marker({ element: e }).setLngLat([tr.lng, tr.lat]).addTo(m);
-      this.markers.set(tr.id, { m: mk, el: e });
+      const mk = new maplibregl.Marker({ element: e, anchor: "bottom" }).setLngLat([tr.lng, tr.lat]).addTo(m);
+      this.markers.set(tr.id, { m: mk, el: e, lng: tr.lng });
     }
   }
 
+  /** Move the truck icons; a truck faces the way it drives (the icon is drawn facing right). */
   private moveMarkers(s: Simulation) {
-    for (const tr of s.trucks) this.markers.get(tr.id)?.m.setLngLat([tr.lng, tr.lat]);
+    for (const tr of s.trucks) {
+      const mk = this.markers.get(tr.id);
+      if (!mk) continue;
+      const dx = tr.lng - mk.lng;
+      if (Math.abs(dx) > 2e-6) { mk.el.dataset.dir = dx < 0 ? "left" : "right"; mk.lng = tr.lng; }
+      mk.m.setLngLat([tr.lng, tr.lat]);
+    }
   }
 
   draw(s: Simulation, pending: PendingLine[] = [], force = false) {
@@ -199,10 +207,10 @@ export class SimRenderer {
     this.walkers = keep;
     (m.getSource("walkers") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: feats });
     const routes: GeoJSON.Feature[] = [], links: GeoJSON.Feature[] = [], props: GeoJSON.Feature[] = [];
+    this.moveMarkers(s);
     for (const tr of s.trucks) {
       const mk = this.markers.get(tr.id);
       if (mk) {
-        mk.m.setLngLat([tr.lng, tr.lat]);
         mk.el.dataset.status = tr.status;
         mk.el.dataset.held = s.locks.has(tr.id) ? "1" : "";
         mk.el.title = `${tr.name}: ${tr.status.replace("_", " ")}${tr.building ? " → " + s.byId.get(tr.building)?.label : ""}`;
@@ -236,10 +244,38 @@ export class SimRenderer {
   }
 }
 
+/** Fire truck, side view, facing right. The ladder (.ladder) lies on the roof; on scene it swings up and extends. */
+const TRUCK_SVG = `<svg viewBox="0 0 64 40" width="58" height="36" aria-hidden="true">
+  <g class="body">
+    <g class="ladder">
+      <rect x="6" y="8" width="34" height="2" rx="1" fill="#e5e7eb"/>
+      <rect x="6" y="12" width="34" height="2" rx="1" fill="#e5e7eb"/>
+      <g fill="#cbd5e1"><rect x="9" y="8" width="1.6" height="6"/><rect x="15" y="8" width="1.6" height="6"/>
+        <rect x="21" y="8" width="1.6" height="6"/><rect x="27" y="8" width="1.6" height="6"/><rect x="33" y="8" width="1.6" height="6"/></g>
+    </g>
+    <rect x="3" y="15" width="40" height="15" rx="2.5" fill="#dc2626" stroke="#7f1d1d" stroke-width="1"/>
+    <path d="M43 17 h9 l7 7 v6 h-16 z" fill="#b91c1c" stroke="#7f1d1d" stroke-width="1"/>
+    <path d="M46 19 h5 l4.5 4.5 h-9.5 z" fill="#bfdbfe"/>
+    <rect x="3" y="24" width="56" height="2" fill="#fde68a"/>
+    <rect class="light" x="45" y="14" width="7" height="3" rx="1" fill="#60a5fa"/>
+    <g class="wheel"><circle cx="13" cy="31" r="4.6" fill="#111827"/><circle cx="13" cy="31" r="1.8" fill="#9ca3af"/></g>
+    <g class="wheel"><circle cx="50" cy="31" r="4.6" fill="#111827"/><circle cx="50" cy="31" r="1.8" fill="#9ca3af"/></g>
+  </g>
+</svg>`;
+
 export const TRUCK_CSS = `
-.truck{background:#f97316;color:#111;font:700 11px/1 -apple-system,sans-serif;padding:3px 4px;border-radius:4px;border:2px solid #fff;box-shadow:0 1px 6px #000a;transition:background .3s;cursor:pointer}
-.truck[data-status=on_scene]{background:#22c55e}
-.truck[data-status=idle]{background:#d4d4d8}
-.truck[data-status=unavailable]{background:#52525b;color:#fff;border-style:dashed}
-.truck[data-held="1"]{outline:2px solid #38bdf8;outline-offset:1px}
+.truck{position:relative;width:58px;height:36px;cursor:pointer;filter:drop-shadow(0 2px 3px #000a);transition:filter .3s,opacity .3s}
+.truck svg{display:block;overflow:visible;transition:transform .25s}
+.truck[data-dir=left] svg{transform:scaleX(-1)}
+.truck .num{position:absolute;left:50%;top:17px;transform:translateX(-50%);font:800 11px/1 -apple-system,sans-serif;color:#fff;
+  text-shadow:0 1px 0 #7f1d1d;pointer-events:none}
+.truck .ladder{transform-box:fill-box;transform-origin:0% 100%;transition:transform .8s cubic-bezier(.4,1.4,.6,1)}
+.truck[data-status=on_scene] .ladder{transform:translate(0,4px) rotate(-38deg) scaleX(1.55)}
+.truck[data-status=en_route] .body{animation:truck-bump .28s ease-in-out infinite alternate}
+.truck[data-status=en_route] .light{animation:truck-light .5s steps(2) infinite}
+.truck[data-status=idle]{opacity:.9}
+.truck[data-status=unavailable]{opacity:.55;filter:grayscale(1) drop-shadow(0 2px 3px #000a)}
+.truck[data-held="1"]{filter:drop-shadow(0 0 4px #38bdf8) drop-shadow(0 2px 3px #000a)}
+@keyframes truck-bump{from{transform:translateY(0)}to{transform:translateY(-1px)}}
+@keyframes truck-light{0%{fill:#60a5fa}50%{fill:#ef4444}}
 `;
