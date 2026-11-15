@@ -37,9 +37,12 @@ export class RoadGraph {
     this.buildingNode = r.building_node;
   }
 
-  /** Shortest road distance (m) from `src` to every node, avoiding edges the fire has closed by `nowMin`.
-   *  Writes into `dist` / `prev` (reused buffers). Stops past `maxM` meters. */
-  dijkstra(src: number | number[], nowMin: number, dist: Float64Array, prev: Int32Array, maxM = Infinity) {
+  /** Shortest road distance (m) from `src` to every node, avoiding edges the fire closes.
+   *  With `speedMpm`, an edge is usable only if the truck finishes crossing it before its fire_min
+   *  (start at `nowMin`, `offsetM` meters already to drive before `src`). Without it, only edges closed by
+   *  `nowMin` are skipped. Writes into `dist` / `prev` (reused buffers). Stops past `maxM` meters. */
+  dijkstra(src: number | number[], nowMin: number, dist: Float64Array, prev: Int32Array, maxM = Infinity,
+           speedMpm = Infinity, offsetM = 0) {
     dist.fill(Infinity); prev.fill(-1);
     const heapN: number[] = [], heapD: number[] = [];
     const push = (node: number, d: number) => {
@@ -74,7 +77,7 @@ export class RoadGraph {
       if (d > dist[u]) continue;
       if (d > maxM) break;
       for (let k = this.start[u], e = this.start[u + 1]; k < e; k++) {
-        if (this.fire[k] <= nowMin) continue;
+        if (this.fire[k] <= nowMin + (offsetM + d + this.len[k]) / speedMpm) continue;
         const v = this.to[k], nd = d + this.len[k];
         if (nd < dist[v]) { dist[v] = nd; prev[v] = u; push(v, nd); }
       }
