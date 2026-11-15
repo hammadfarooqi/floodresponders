@@ -33,6 +33,9 @@ COSTAR_PROPERTY_TYPE = {
 COSTAR_HOME_TYPE = {1: "single_family", 2: "single_family", 64: "single_family"}  # other home types: multi_family
 COSTAR_MATERIAL = {1: "masonry", 2: "metal", 3: "reinforced_concrete", 4: "steel", 5: "wood_frame",
                    6: "masonry", 7: "masonry"}
+COSTAR_RENT_TYPE = {1: "market", 2: "affordable", 3: "mixed"}       # mixed: market-rate and affordable units
+COSTAR_APARTMENT_STYLE = {1: "garden", 2: "mid_rise", 3: "high_rise", 4: "low_rise", 5: "single_family",
+                          6: "townhome"}
 MATTERPORT_REFERENCE_TYPES = {36, 234}
 ASSESSOR_USE_TYPE = {"Commercial": "commercial", "Recreational": "commercial", "Industrial": "industrial",
                      "Institutional": "institutional", "Government": "institutional"}
@@ -179,6 +182,7 @@ def commercial_property(record, listing_units=None):
     height_ft = record.get("buildingHeightInFeet")
     hotel = record.get("propertyHospitality") or {}
     floor_plan_units = sum(plan.get("numUnits") or 0 for plan in apt.get("models") or [])
+    lot_numbers = record.get("parcelNumbers") or []
     return {
         "costar_id": str(record["id"]),
         "kind": "commercial",
@@ -201,6 +205,11 @@ def commercial_property(record, listing_units=None):
         "has_sprinklers": record.get("hasSprinklers"),
         "has_basement": None,
         "has_accessibility_features": None,
+        "vacancy_pct": apt.get("vacancyPercent"),
+        "rent_type": COSTAR_RENT_TYPE.get(apt.get("apartmentRentType")),
+        "num_buildings": apt.get("numBuildings") or None,
+        "apartment_style": COSTAR_APARTMENT_STYLE.get(apt.get("apartmentStyleType")),
+        "parcel_number": re.sub(r"\D", "", lot_numbers[0]) or None if lot_numbers else None,
         "matterport_model_ids": _matterport_ids(record),
     }
 
@@ -238,6 +247,8 @@ def residential_property(record):
         "has_sprinklers": None,
         "has_basement": reso.get("hasBasement"),
         "has_accessibility_features": reso.get("hasAccessibilityFeatures"),
+        "vacancy_pct": None, "rent_type": None, "num_buildings": None, "apartment_style": None,
+        "parcel_number": None,
         "matterport_model_ids": sorted({m["videoKey"] for m in record.get("media") or []
                                         if m.get("videoKey") and m.get("externalReferenceType") in MATTERPORT_REFERENCE_TYPES}),
     }
@@ -307,6 +318,15 @@ def vexcel_structure(feature, structure):
         "roof_condition": int(condition) if condition is not None else None,
         "roof_material": _clean(structure.get("roof-characteristics.material.class")),
         "roof_shape": _clean(structure.get("roof-characteristics.shape.value")),
+        "roof_tree_cover_pct": structure.get("roof-characteristics.tree-cover.percent"),
+        "roof_structural_damage": structure.get("roof-defects.structural-damage.detected"),
+        "roof_missing_material": structure.get("roof-defects.missing-material.detected"),
+        "roof_tarp": structure.get("roof-defects.tarp.detected"),
+        "roof_debris": structure.get("roof-defects.debris.detected"),
+        "has_solar_panels": structure.get("roof-objects.solar.value"),
+        "vexcel_type_confidence": structure.get("building-type.score"),
+        "roof_material_confidence": structure.get("roof-characteristics.material.score"),
+        "roof_shape_confidence": structure.get("roof-characteristics.shape.score"),
         **zone,
         "parcel_tree_cover_pct": parcel.get("parcel-tree-cover.percent"),
         "parcel_hardscape_pct": parcel.get("hardscapes.percent"),
@@ -317,6 +337,9 @@ def vexcel_structure(feature, structure):
 
 _VEXCEL_COLUMNS = ("parcel_key", "footprint", "footprint_area_m2", "ground_elevation_m", "vexcel_height_m",
                    "vexcel_building_type", "is_primary_on_parcel", "roof_condition", "roof_material", "roof_shape",
+                   "roof_tree_cover_pct", "roof_structural_damage", "roof_missing_material", "roof_tarp",
+                   "roof_debris", "has_solar_panels", "vexcel_type_confidence", "roof_material_confidence",
+                   "roof_shape_confidence",
                    "tree_density_zone1", "tree_density_zone2", "tree_density_zone3", "tree_density_zone4",
                    "building_density_zone1", "building_density_zone2", "building_density_zone3",
                    "building_density_zone4", "parcel_tree_cover_pct", "parcel_hardscape_pct", "vexcel_survey",
@@ -332,7 +355,10 @@ def assessor_lot(feature):
     has_homes = a.get("UseType") == "Residential" or a.get("UseDescription") in ASSESSOR_HOME_DESCRIPTIONS
     years = [int(y) for y in (str(a.get(f"YearBuilt{n}") or "") for n in slots) if y.isdigit() and int(y) > 1800]
     units = [a.get(f"Units{n}") or 0 for n in slots]
-    return {"ain": a["AIN"], "rings": [[(p[0], p[1]) for p in ring] for ring in feature["geometry"]["rings"]],
+    street = " ".join(" ".join(str(a.get(f"Situs{part}") or "") for part in ("HouseNo", "Fraction", "Direction",
+                                                                             "Street")).split())
+    return {"address": street or None, "sqft": sum(a.get(f"SQFTmain{n}") or 0 for n in slots),
+            "ain": a["AIN"], "rings": [[(p[0], p[1]) for p in ring] for ring in feature["geometry"]["rings"]],
             "use_type": a.get("UseType"), "use_description": a.get("UseDescription"),
             "units": sum(u for u in units if u != ASSESSOR_UNKNOWN_UNITS) if has_homes else 0,
             "bedrooms": sum(a.get(f"Bedrooms{n}") or 0 for n in slots),
@@ -374,7 +400,8 @@ def merge_lots(lots):
     years = [lot["year_built"] for lot in lots if lot["year_built"]]
     return {"key": tuple(sorted(lot["ain"] for lot in lots)), "ain": main["ain"], "use_type": main["use_type"],
             "use_description": main["use_description"], "units": sum(lot["units"] for lot in lots),
-            "bedrooms": sum(lot["bedrooms"] for lot in lots), "year_built": min(years, default=None)}
+            "bedrooms": sum(lot["bedrooms"] for lot in lots), "year_built": min(years, default=None),
+            "address": main["address"], "sqft": sum(lot["sqft"] for lot in lots)}
 
 
 def assessor_building_type(lot):
@@ -479,6 +506,8 @@ def resolve(row, prop=None, units_share=None, lot=None, lot_units=None):
     row["assessor_units"] = lot.get("units") or None                # 0 on the tax roll means "not known"
     row["assessor_bedrooms"] = lot.get("bedrooms") or None
     row["assessor_year_built"] = lot.get("year_built")
+    row["assessor_address"] = lot.get("address")
+    row["assessor_sqft"] = lot.get("sqft") or None                  # 0 on the tax roll means "not known"
     row["costar_id"] = prop.get("costar_id")
     row.setdefault("shares_costar_property", False)
     sources = [row["building_type_source"], row["height_source"], row["floors_source"], row["units_source"]]

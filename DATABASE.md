@@ -55,10 +55,19 @@ Also: view `buildings_geojson` (all `buildings` columns plus `footprint_geojson`
 | `vexcel_height_m` | number | Roof height above the ground in meters, computed by Vexcel. Noisy: range -4.9 to 85.2, and 383 values are below zero. Keep it as a cross-check and use `height_m` | 40,221 |
 | `vexcel_building_type` | text | Vexcel's guess from the photo: `single_family`, `multiple_family`, `condo_apartment`, `mobile_home`, `institutional_buildings`, `commercial`, `industrial_buildings`, `shed`, `garages_carports`. "Institutional" is often wrong (problem 8) | 40,099 |
 | `is_primary_on_parcel` | true/false | True for the structure Vexcel marks as the main one on its lot. One per lot | 40,221 |
-| `roof_condition` | 1 to 5 | Vexcel's roof condition grade. Vexcel's tutorial does not say which end is good. In the 3 buildings we looked at by hand, the roofs with defects had lower grades, so higher is probably better (problem 27). Counts: 1: 459, 2: 2,921, 3: 14,684, 4: 19,863, 5: 2,294 | 40,221 |
+| `roof_condition` | 1 to 5 | Vexcel's roof condition grade. 5 is best ("looks new"), 1 is worst (problem 27). Counts: 1: 459, 2: 2,921, 3: 14,684, 4: 19,863, 5: 2,294 | 40,221 |
 | `roof_material` | text | `membrane`, `shingle`, `tile`, `metal`, `gravel` | 40,210 |
 | `roof_shape` | text | `flat`, `hip`, `gable` | 40,221 |
-| `tree_density_zone1` to `zone4` | number | Tree cover in four rings around the structure, zone 1 nearest. Vexcel calls these "defensible space" and uses them for wildfire risk. Hammad's notes give zone 1 as 0 to 1.5 m and zone 2 as 1.5 to 9 m; we did not check this. The unit looks like percent, but 712 zone 1 values are above 100 (problem 28) | 40,221 |
+| `roof_tree_cover_pct` | 0 to 100 | Percent of the roof under tree branches. 0 on 12,474 rows, above 10 on 5,093 | 40,221 |
+| `roof_structural_damage` | true/false | Vexcel sees structural damage on the roof. True on 8,045 | 40,221 |
+| `roof_missing_material` | true/false | Vexcel sees roof material missing. True on 19,576, so it is a weak sign (problem 50) | 40,221 |
+| `roof_tarp` | true/false | A tarp is on the roof. True on 1,119 | 40,221 |
+| `roof_debris` | true/false | Debris is on the roof. True on 2,507 | 40,221 |
+| `has_solar_panels` | true/false | Solar panels are on the roof. True on 3,184 | 40,221 |
+| `vexcel_type_confidence` | 0 to 1 | How sure Vexcel is of `vexcel_building_type`. Median 0.58; under 0.5 on 15,978 rows (problem 49) | 40,099 |
+| `roof_material_confidence` | 0 to 1 | How sure Vexcel is of `roof_material`. Median 0.58 | 31,092 |
+| `roof_shape_confidence` | 0 to 1 | How sure Vexcel is of `roof_shape`. Median 1.0 | 39,974 |
+| `tree_density_zone1` to `zone4` | number | Tree cover around the structure, zone 1 nearest. Vexcel calls these "defensible space" and uses them for wildfire risk. The zones reach 5, 30, 100 and 200 feet from the wall (1.5, 9, 30 and 61 m). Each zone includes the zones inside it: they are not separate rings. The value is a percent, and it can go above 100 (problem 28) | 40,221 |
 | `building_density_zone1` to `zone4` | number | Share of each ring covered by other buildings. Close neighbors help fire spread. Highest value seen: 71 | 40,221 |
 | `parcel_tree_cover_pct` | 0 to 100 | Percent of the lot under tree cover | 40,221 |
 | `parcel_hardscape_pct` | 0 to 100 | Percent of the lot that is paved (driveways, patios, parking) | 40,221 |
@@ -96,6 +105,8 @@ across structures (problem 38).
 | `assessor_units` | whole number | Homes on the lot. Null when the tax roll has 0, and on lots that are not housing (problem 39) | 35,817 |
 | `assessor_bedrooms` | whole number | Bedrooms on the lot. 99 is probably a placeholder (problem 37) | 35,527 |
 | `assessor_year_built` | whole number | Year of the oldest building on the lot | 38,491 |
+| `assessor_address` | text | Street address of the lot, in capitals, with no unit number and no city. Every structure on the lot has the same one | 40,161 |
+| `assessor_sqft` | whole number | Floor area of the buildings on the lot, in square feet, for the whole lot (problem 38). Highest: 1,352,132. Not used in any rule yet | 38,296 |
 
 **Copied from CoStar** (null on every Vexcel-only row)
 
@@ -148,6 +159,11 @@ CoStar's own values for a whole property, before we split anything across struct
 | `has_sprinklers` | true/false | 29 true | 36 |
 | `has_basement` | true/false | Homes only | 25 |
 | `has_accessibility_features` | true/false | Homes only: the listing mentions features such as ramps or wide doors | 25 |
+| `vacancy_pct` | 0 to 100 | Apartments: percent of units that are empty. 0 means full. Median 4. The risk score still uses a fixed 5% | 127 |
+| `rent_type` | text | Apartments: `market` (229), `mixed` (30: market-rate and affordable units) or `affordable` (2) | 261 |
+| `num_buildings` | whole number | Apartments: buildings that make up the property. 1 on 232, 2 to 5 on 26. Compare it with the structures that share the property (problem 12) | 258 |
+| `apartment_style` | text | `low_rise` (126), `mid_rise` (122), `high_rise` (4), `garden` (3) | 255 |
+| `parcel_number` | text | CoStar's first county lot number, 10 digits, in the form of `buildings.assessor_ain` (problem 51) | 273 |
 | `matterport_model_ids` | list of text | Ids of the Matterport 3D scans of this property. Empty list when there is none. 294 properties have at least one | 300 |
 
 ### `contacts` (436 rows)
@@ -371,8 +387,8 @@ Structure (a missing value adds 0):
 | `year_built` is 2008 or later | -0.05 |
 
 "By rank" means: the adjustment times the share of structures (sheds and garages left out) that have a lower
-value. The lowest value adds 0 and the highest adds the full adjustment. Rank is used because the unit of the tree
-columns is not clear (problem 28). `roof_condition` is not used (problem 27).
+value. The lowest value adds 0 and the highest adds the full adjustment. Rank is used because the tree columns are
+not a plain share (problem 28). `roof_condition` is not used yet; its direction is known now (problem 27).
 
 **Every number in this section is a first guess, not a measurement.** They are in `WEIGHTS` at the top of
 `data/db/risk_score.py`. If you change one, change these tables and run the import again. Nobody has checked the
@@ -433,10 +449,26 @@ section where they fit. That is why the numbers are not in order.
     structures that Vexcel types as multi-family. Before the Assessor load, 34 rows had an estimated `units`
     above 200. Now 2 rows do (highest 3,271), because most rows have a real count. Cap or check estimated values
     above about 200 before you use them in a ranking.
-27. **The direction of `roof_condition` is not documented** in the Vexcel tutorial. In the 3 buildings we looked at by hand, the
-    roofs with defects had lower grades, so higher is probably better. That is a guess from a small sample. Confirm with the Vexcel mentors before you build on it.
-28. **`tree_density_zone1` goes above 100** on 712 rows (highest 262). So it is not a plain percent, and we do not
-    know the unit. Zones 2 to 4 stay under 100. Compare rows with each other, and do not read it as a share.
+27. **`roof_condition`: 5 is best, 1 is worst.** Vexcel's tutorial does not say it. An archived copy of the data
+    dictionary of Vexcel's older API (1.0) does: 5 = great, "looks new"; 4 = good; 3 = fair; 2 = poor; 1 = bad.
+    Our rows agree: a tarp is on 28.8% of grade 1 roofs, then 6.7%, 3.4%, 1.4%, and 0.4% of grade 5 roofs. The
+    dictionary is for the older API, so ask the Vexcel mentors if you need to be certain.
+28. **The tree and building zone values are percents that can go above 100.** The same archived dictionary gives
+    the rule for the 5-foot zone: area of trees in areas A and B, divided by the area of B. B is the ring out to 5
+    feet. A is drawn in a diagram that we could not see; we read it as the structure itself. That explains values
+    above 100 when trees hang over the roof: `tree_density_zone1` is above 100 on 712 rows (highest 262), and
+    zone 2 on 5 rows. **The zones are cumulative:** the 30-foot value counts everything within 30 feet, the 5-foot
+    zone included. The risk score adds zone 1, zone 2 and the mean of zones 3 and 4 as if they were separate
+    rings, so trees next to the wall count more than once. The dictionary names the zones by distance (5, 30, 100
+    and 200 feet); a second Vexcel page maps them to zones 1 to 4 of the newer API. We read the first page
+    ourselves, and the second only through a research summary. Compare rows with each other, and do not read a
+    value as a share.
+49. **`vexcel_type_confidence` does not find the wrong types.** Vexcel's "institutional" type is wrong on most
+    rows (problem 8), and its median confidence there is 0.61, above the 0.55 of single homes. Do not use a low
+    value as a sign that the type is wrong. Use the Assessor type (`building_type_source`).
+50. **`roof_missing_material` is true on 49% of roofs, and more often on good roofs** (54% of grade 5, 39% of
+    grade 1). It does not follow the roof grade. `roof_tarp` does (problem 27). `roof_structural_damage` is true
+    on 18% to 31% of every grade. Treat the three defect flags other than `roof_tarp` as weak signs.
 
 ### The risk score
 
@@ -486,6 +518,12 @@ section where they fit. That is why the numbers are not in order.
 41. **Government lots are typed `institutional`.** 1,120 structures stand on lots of use type `Government`. They
     include schools and offices, and the tax record does not say which. People not known.
 
+51. **CoStar's lot number is not always the lot under the building.** Of 252 properties that have a
+    `parcel_number` and a structure on an Assessor lot, 239 have a structure whose `assessor_ain` is that number.
+    The other 13 name a different lot (a property can cover several lots, and CoStar lists only some).
+52. **An Assessor cache made before 2026-11-15 has no address and no floor area.** The import stops and tells you
+    to delete `data/cache/assessor_hollywood/`. It does not upload empty values.
+
 ### Facilities
 
 42. **The risk score does not use `facilities` yet.** The 38 care homes for the elderly and nursing homes have a
@@ -512,8 +550,8 @@ section where they fit. That is why the numbers are not in order.
 16. **The area is smaller than the demo area.** The demo pipeline on branch `hammad_1` uses the Hollywood plan
     area plus the Sunset Fire evacuation areas (42,557 buildings). This database holds the plan area only
     (40,246). To match, run the import with that boundary (see "How to load it again").
-17. **County Assessor data is loaded for units, use and year built** (2026-11-14). Floor area is not loaded, and
-    the demo pipeline on branch `hammad_1` reads its own copy. The two can differ.
+17. **County Assessor data is loaded for units, use, year built, address and floor area** (2026-11-15). Floor
+    area is stored and no rule uses it yet. The demo pipeline on branch `hammad_1` reads its own copy. The two can differ.
 18. **Floor height differs:** `DemoBuilding.height_m` in `CONTRACTS.md` uses stories x 3.2 m. This database uses
     3.3 m. The difference is 3%.
 19. **Row ids are not the pipeline's ids.** `buildings.id` is a UUID made by the import. Join to pipeline output by
@@ -530,4 +568,4 @@ section where they fit. That is why the numbers are not in order.
 23. **No rate limit was reached** at 500 parcels per call, one call at a time (129 calls). Parallel calls are
     untested.
 24. **Vexcel gives no address and no parcel number.** A Vexcel-only building has a location and an outline, and
-    no name.
+    no name. The County Assessor fills both for 40,161 rows: `assessor_address` and `assessor_ain`.
