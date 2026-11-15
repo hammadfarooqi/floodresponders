@@ -274,7 +274,7 @@ export default function ConsoleView() {
         if (p.applied) return (now - p.wall) / 1000 < REVIEW_SECONDS && tr?.building === p.building;
         return b && !b.burned && b.needKnown > 0.5 && tr && tr.status !== "unavailable" && tr.building !== p.building; });
       syncFeed(); draw(s.done);
-      if (followRef.current && map.current && now - lastCam > 2000) { lastCam = now; frameSim(map.current, s, 1500); }
+      if (followRef.current && map.current && now - lastCam > 1000) { lastCam = now; frameSim(map.current, s, 900); }
       if (now - lastUi > 120 || s.done) { lastUi = now; refresh(); }
       if (s.done) { setPlaying(false); return; }
       raf = requestAnimationFrame(loop);

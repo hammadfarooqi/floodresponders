@@ -152,8 +152,8 @@ export default function SimView() {
       }
       logSeen.current = s.log.length;
       draw(s.done);
-      // camera: at most every 2 s, a 1.5 s ease (each move redraws the whole map, so not every frame)
-      if (followRef.current && map.current && now - lastCam > 2000) { lastCam = now; frameSim(map.current, s, 1500); }
+      // camera: at most every 1 s (1 s = 7 sim min at 1x), a 0.9 s ease; frameSim skips small changes
+      if (followRef.current && map.current && now - lastCam > 1000) { lastCam = now; frameSim(map.current, s, 900); }
       if (now - lastUi > 100 || pause || s.done) { lastUi = now; setFrame(f => f + 1); }
       if (s.done) { setResults(r => ({ ...r, [s.policy]: s.counts })); setPlaying(false); return; }
       if (pause) { setPlaying(false); return; }
@@ -162,6 +162,11 @@ export default function SimView() {
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [playing, speed, pauseOnCalls]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // when playback stops (pause, a call, the end), frame the trucks where they are now
+  useEffect(() => {
+    if (!playing && followRef.current && map.current && sim.current) frameSim(map.current, sim.current, 600);
+  }, [playing]);
 
   const skipToEnd = () => {
     const s = sim.current;

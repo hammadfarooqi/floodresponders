@@ -42,13 +42,9 @@ export function setHills(m: maplibregl.Map, on: boolean) {
   m.setTerrain(on ? { source: "dem", exaggeration: 1.4 } : null);
 }
 
-/** Last free area measured (px from each side of the map); the truck spread stays inside it. */
-let lastFree = { top: 0, bottom: 0, left: 0, right: 0 };
-
 /** Free part of the screen: the map minus the cards that float over it (.card elements that are shown). */
 export function freePadding(m: maplibregl.Map): maplibregl.PaddingOptions {
   const box = m.getContainer().getBoundingClientRect(), W = box.width, H = box.height;
-  // (a raised ladder reaches ~25 px above the icon, so rows of the spread are 46 px apart)
   // room for the truck icon itself (58 x 36 px, anchored at its bottom centre, + label above) and the zoom buttons
   const pad = { top: 70, bottom: 20, left: 40, right: 70 };
   for (const c of document.querySelectorAll<HTMLElement>(".card")) {
@@ -67,24 +63,33 @@ export function freePadding(m: maplibregl.Map): maplibregl.PaddingOptions {
   const over = pad.left + pad.right + 240 - W;
   if (over > 0) { pad.left = Math.max(10, pad.left - over / 2); pad.right = Math.max(10, pad.right - over / 2); }
   if (pad.top + pad.bottom + 200 > H) pad.bottom = Math.max(10, H - pad.top - 200);
-  lastFree = { top: 0, bottom: Math.max(0, pad.bottom - 20), left: Math.max(0, pad.left - 40), right: Math.max(0, pad.right - 40) };
   return pad;
 }
 
-/** Camera that keeps every truck and every building the fire reaches inside the free part of the screen. */
+/** Camera that keeps all 8 trucks (and where they drive) inside the free part of the screen. */
 export function frameSim(m: maplibregl.Map, s: Simulation, duration: number) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const add = (x: number, y: number) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
-  for (const b of s.buildings) add(b.lng, b.lat);
-  for (const tr of s.trucks) add(tr.lng, tr.lat);
+  // the 8 trucks and the buildings they drive to (not every building: then the trucks crowd into a small spot)
+  for (const tr of s.trucks) {
+    add(tr.lng, tr.lat);
+    const b = tr.building ? s.byId.get(tr.building) : undefined;
+    if (b) add(b.lng, b.lat);
+  }
   if (!isFinite(x0)) return;
-  const cam = m.cameraForBounds([[x0, y0], [x1, y1]], { padding: freePadding(m), pitch: m.getPitch(), bearing: m.getBearing() });
+  // at least ~650 m across, so the camera does not zoom in to a single street
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hx = Math.max((x1 - x0) / 2, 0.0035), hy = Math.max((y1 - y0) / 2, 0.003);
+  [x0, x1, y0, y1] = [cx - hx, cx + hx, cy - hy, cy + hy];
+  const cam = m.cameraForBounds([[x0, y0], [x1, y1]], { padding: freePadding(m), pitch: m.getPitch(), bearing: m.getBearing(), maxZoom: 15.5 });
   if (!cam) return;
   const c = m.getCenter(), z = m.getZoom(), tc = maplibregl.LngLat.convert(cam.center!);
   // do not move for tiny changes (each camera move redraws the whole map)
+  // zoom in steps of 0.25 (rounded down, so everything still fits) and move only for clear changes: each zoom change
+  // loads new map tiles, and moving every 2 s for small changes cost ~40 slow frames per run
+  const tz = Math.floor((cam.zoom ?? z) * 4) / 4;
   const moved = m.project(tc).dist(m.project(c));
-  if (duration > 0 && moved < 25 && Math.abs((cam.zoom ?? z) - z) < 0.08) return;
-  m.easeTo({ ...cam, pitch: m.getPitch(), bearing: m.getBearing(), duration, essential: true });
+  if (duration > 0 && moved < 60 && Math.abs(tz - z) < 0.25) return;
+  m.easeTo({ ...cam, zoom: tz, pitch: m.getPitch(), bearing: m.getBearing(), duration, essential: true });
 }
 
 export const fmtT = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
@@ -151,6 +156,7 @@ export class SimRenderer {
   private fire = { burn: 0, cool: 0, bld: 0 };
   private lastPush = -1e9;
   private ringKey = "";   // wall time of the last setData on the moving layers
+  private scale = 0;                      // truck icon size factor (by zoom)
   private size = { w: 0, h: 0 };          // map size in px (read on resize, not every frame)
   private riskOn = false;                 // risk view: buildings colored by dynamic risk (feature-state "rk")
   private rk = new Int8Array(0);          // last risk step sent to the map, per sim building
@@ -232,7 +238,8 @@ export class SimRenderer {
     for (const tr of s.trucks) {
       const e = document.createElement("div");
       e.className = "truck";
-      e.innerHTML = TRUCK_SVG + `<span class="num">${tr.station}</span><span class="say"></span>`;
+      e.innerHTML = `<div class="tk">${TRUCK_SVG}<span class="num">${tr.station}</span></div><span class="say"></span>`;
+      if (this.scale) { e.style.setProperty("--s", String(this.scale)); e.dataset.small = this.scale < 0.7 ? "1" : ""; }
       e.dataset.status = tr.status;
       e.addEventListener("click", ev => { ev.stopPropagation(); this.onTruckClick?.(tr.id); });
       const mk = new maplibregl.Marker({ element: e, anchor: "bottom" }).setLngLat([tr.lng, tr.lat]).addTo(m);
@@ -242,41 +249,43 @@ export class SimRenderer {
 
   /** Move the truck icons (every frame); a truck faces the way it drives (the icon is drawn facing right). */
   private moveMarkers(s: Simulation) {
-    // Trucks near each other on screen are spread out (up, then left/right) with a stem to the real point, so no truck
-    // hides another. Zoomed out to show all buildings, 58 px is about 300 m, so trucks at near buildings touch.
-    const placed: { x0: number; x1: number; y: number }[] = [];
-    const { w: W, h: H } = this.size;
-    for (const tr of s.trucks) {
+    // Icons are smaller when zoomed out (half size at the zoom that shows the whole area), so trucks at near buildings
+    // overlap less. A truck whose place is taken moves at most one icon (up or to a side), with a short stem to its
+    // real point; if there is no free place it stays on its real point and may overlap (working trucks on top).
+    // (Before: a spread of up to ~250 px kept every truck free but put icons far from where the trucks were.)
+    const sc = Math.round(Math.max(0.5, Math.min(1, (this.m.getZoom() - 11.6) / 2.4)) * 20) / 20;
+    if (sc !== this.scale) {
+      this.scale = sc;
+      // labels shrink with the icon and hide below 70% (zoomed out they covered the trucks; the raised ladder still shows work)
+      for (const { el } of this.markers.values()) { el.style.setProperty("--s", String(sc)); el.dataset.small = sc < 0.7 ? "1" : ""; }
+    }
+    const w = 58 * sc, h = 36 * sc;
+    const near: [number, number][] = [[0, 0], [0, -(h + 2)], [w + 2, 0], [-(w + 2), 0]];
+    const placed: { x: number; y: number }[] = [];
+    // working trucks first: they keep their real place
+    const order = [...s.trucks].sort((a, b) => RANK[b.status] - RANK[a.status]);
+    for (const tr of order) {
       const mk = this.markers.get(tr.id);
       if (!mk) continue;
       const dx = tr.lng - mk.lng;
       if (Math.abs(dx) > 2e-6) { mk.el.dataset.dir = dx < 0 ? "left" : "right"; mk.lng = tr.lng; }
       mk.m.setLngLat([tr.lng, tr.lat]);
       // status, ladder and label follow the truck in the same frame
-      if (mk.el.dataset.status !== tr.status) mk.el.dataset.status = tr.status;
+      if (mk.el.dataset.status !== tr.status) { mk.el.dataset.status = tr.status; mk.el.style.zIndex = String(RANK[tr.status]); }
       const held = s.locks.has(tr.id) ? "1" : "";
       if (mk.el.dataset.held !== held) mk.el.dataset.held = held;
       const tb = tr.building ? s.byId.get(tr.building) : undefined;
       const say = tr.status === "on_scene" && tb ? (tb.need >= 0.5 ? `bringing out ${Math.ceil(tb.need - 0.01)}` : "all out ✓") : "";
       const sayEl = mk.el.lastElementChild as HTMLElement;
       if (sayEl.textContent !== say) sayEl.textContent = say;
-      // screen box of the icon (+ its label on the side it faces)
       const p = this.m.project([tr.lng, tr.lat]);
-      const lab = say ? 7 * say.length + 18 : 0, left = mk.el.dataset.dir === "left";
-      let off: [number, number] = [0, 0], fewest = Infinity;
-      for (const c of SPREAD) {
+      let off: [number, number] = [0, 0];
+      for (const c of near) {
         const x = p.x + c[0], y = p.y + c[1];
-        const x0 = x - 31 - (left ? lab : 0), x1 = x + 31 + (left ? 0 : lab);
-        // never spread a truck (or its label) off screen or under a panel
-        const f = lastFree;
-        if (c[0] !== 0 || c[1] !== 0) if (x0 < f.left || x1 > W - f.right || y - 36 < f.top || y > H - f.bottom) continue;
-        const n = placed.reduce((k, q) => k + (q.x0 < x1 && x0 < q.x1 && Math.abs(q.y - y) < 46 ? 1 : 0), 0);
-        if (n < fewest) { fewest = n; off = c; }
-        if (n === 0) break;
+        if (!placed.some(q => Math.abs(q.x - x) < w && Math.abs(q.y - y) < h)) { off = c; break; }
       }
-      const x = p.x + off[0];
-      placed.push({ x0: x - 31 - (left ? lab : 0), x1: x + 31 + (left ? 0 : lab), y: p.y + off[1] });
-      const key = off[0] * 1000 + off[1];
+      placed.push({ x: p.x + off[0], y: p.y + off[1] });
+      const key = Math.round(off[0]) * 1000 + Math.round(off[1]);
       if (mk.lift !== key) {
         mk.lift = key;
         mk.m.setOffset(off);
@@ -373,14 +382,8 @@ export class SimRenderer {
   }
 }
 
-/** Where a truck icon may go when its own place is taken (px from its real point): up, then the sides, then higher. */
-const SPREAD: [number, number][] = (() => {
-  const out: [number, number][] = [];
-  for (let r = -1; r <= 6; r++) for (let c = -4; c <= 4; c++) out.push([c * 64 + (r & 1 ? 32 : 0), -r * 46]);
-  // nearest first; a place above costs less than one below (the stem then points down to the building)
-  const cost = ([x, y]: [number, number]) => Math.hypot(x, y * (y > 0 ? 2.5 : 1));
-  return out.sort((a, b) => cost(a) - cost(b));
-})();
+/** Draw order and who keeps its real place first: working, driving, waiting, out of service. */
+const RANK: Record<string, number> = { on_scene: 4, en_route: 3, idle: 2, unavailable: 1 };
 
 /** Fire truck, side view, facing right. The ladder (.ladder) lies on the roof; on scene it swings up and extends. */
 const TRUCK_SVG = `<svg viewBox="0 0 64 40" width="58" height="36" aria-hidden="true">
@@ -405,7 +408,8 @@ export const TRUCK_CSS = `
 /* position must stay absolute: MapLibre places markers with absolute + transform. "relative" stacked the 8 markers in
    page flow, so truck i was drawn i x 36 px below its real place (found 2026-11-14). */
 .maplibregl-marker.truck{position:absolute}
-.truck{width:58px;height:36px;cursor:pointer;filter:drop-shadow(0 2px 3px #000a);transition:filter .3s,opacity .3s}
+.truck{width:calc(58px * var(--s, 1));height:calc(36px * var(--s, 1));cursor:pointer;filter:drop-shadow(0 2px 3px #000a);transition:filter .3s,opacity .3s}
+.truck .tk{position:absolute;left:0;bottom:0;width:58px;height:36px;transform:scale(var(--s, 1));transform-origin:0 100%}
 .truck svg{display:block;overflow:visible;transition:transform .25s}
 .truck[data-dir=left] svg{transform:scaleX(-1)}
 .truck .num{position:absolute;left:50%;top:17px;transform:translateX(-50%);font:800 11px/1 -apple-system,sans-serif;color:#fff;
@@ -413,7 +417,8 @@ export const TRUCK_CSS = `
 .truck .say{position:absolute;left:100%;top:50%;margin-left:2px;transform:translateY(-50%);white-space:nowrap;
   font:700 11px/1 -apple-system,sans-serif;color:#111;background:#c084fc;border-radius:9px;padding:3px 7px;pointer-events:none;
   box-shadow:0 1px 4px #0008}
-.truck .say:empty{display:none}
+.truck .say:empty,.truck[data-small="1"] .say{display:none}
+.truck .say{font-size:calc(11px * var(--s, 1));padding:calc(3px * var(--s, 1)) calc(7px * var(--s, 1))}
 .truck[data-dir=left] .say{left:auto;right:100%;margin:0 2px 0 0}
 .truck[data-lifted="1"]::after{content:"";position:absolute;left:50%;top:100%;width:var(--stem);height:2px;margin-top:-1px;
   transform-origin:0 50%;transform:rotate(var(--stem-a));background:#fff;opacity:.85;box-shadow:0 0 2px #000;pointer-events:none}
