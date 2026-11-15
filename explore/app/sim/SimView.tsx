@@ -201,7 +201,7 @@ export default function SimView() {
             <tr><td>AI choice</td><td>pair value = people needing help × urgency ÷ (drive min + min on scene + 1); urgency = 1 / (1 + minutes until fire / {cfg.urgency_tau_min}); best pair first</td></tr>
             <tr><td>AI re-match</td><td>every {cfg.rematch_every_min} min and after every call</td></tr>
             <tr><td>People per building</td><td>units × 2.4 × 0.95; need help = 10% (estimate, BUILDING_MODEL.md)</td></tr>
-            <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (138°); the front stops at Hollywood Blvd at 3:00 (crews hold the line)</td></tr>
+            <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (about 130°); the front stops at Hollywood Blvd at 3:00 (crews hold the line)</td></tr>
             <tr><td>Calls</td><td>scripted demo words; effects are simulated. {STUCK.count} stuck tenants exist in both runs; only the AI run gets the call</td></tr>
             <tr><td>Trucks</td><td>8 engines from LAFD stations south of the hills; same start in both runs</td></tr>
           </tbody></table>)}
