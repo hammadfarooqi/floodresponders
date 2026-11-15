@@ -6,6 +6,7 @@
 
 Needs the root .env (see .env.example) and the CoStar kit at data/costar-kit/. Standard library only.
 Vexcel answers are cached in data/cache/vexcel_hollywood/, so only the first run calls Vexcel (about 4 minutes).
+County Assessor lots are public and need no key. They are cached in data/cache/assessor_hollywood/ (about 1 minute).
 The load is an upsert on the row id: running it again updates rows and never makes duplicates.
 Read DATABASE.md before you change anything here.
 """
@@ -27,6 +28,11 @@ import risk_score as rs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VEXCEL_URL = "https://api.vexcelgroup.com/v2/property/extract"
+ASSESSOR_URL = "https://public.gis.lacounty.gov/public/rest/services/LACounty_Cache/LACounty_Parcel/MapServer/0/query"
+ASSESSOR_FIELDS = ["AIN", "UseType", "UseDescription"] + [f"{name}{n}" for n in range(1, 6)
+                                                         for name in ("Units", "YearBuilt", "Bedrooms")]
+ASSESSOR_TILES_PER_SIDE = 6
+ASSESSOR_PAGE_SIZE = 1000               # the most the service returns in one answer
 USER_AGENT = "rollcall-loader"
 TILES_PER_SIDE = 4
 PAGE_SIZE = 500
@@ -112,6 +118,50 @@ def read_vexcel(cache_dir):
     return features
 
 
+# ---------------------------------------------------------------- County Assessor
+
+def fetch_assessor(boundary, cache_dir):
+    """Every Los Angeles County lot that touches the box around the boundary. One cache file per tile.
+
+    A lot on a tile edge is in two files; build_rows keeps it once. Lots outside the boundary do no harm.
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    west, south, east, north = br.bounds(boundary)
+    side = ASSESSOR_TILES_PER_SIDE
+    for i in range(side):
+        for j in range(side):
+            box = (west + (east - west) * i / side, south + (north - south) * j / side,
+                   west + (east - west) * (i + 1) / side, south + (north - south) * (j + 1) / side)
+            lots = []
+            while True:
+                query = urllib.parse.urlencode({
+                    "where": "1=1", "geometry": ",".join(str(v) for v in box), "geometryType": "esriGeometryEnvelope",
+                    "inSR": 4326, "outSR": 4326, "spatialRel": "esriSpatialRelIntersects",
+                    "outFields": ",".join(ASSESSOR_FIELDS), "returnGeometry": "true", "geometryPrecision": 6,
+                    "orderByFields": "OBJECTID", "resultOffset": len(lots), "resultRecordCount": ASSESSOR_PAGE_SIZE,
+                    "f": "json"})
+                status, raw = request("GET", f"{ASSESSOR_URL}?{query}", {"User-Agent": "generic-client"})
+                page = json.loads(raw) if status == 200 else {}
+                if "features" not in page:              # the service reports errors inside a 200 answer
+                    sys.exit(f"County Assessor answered {status} for tile {i},{j}: {raw[:300]!r}")
+                lots.extend(page["features"])
+                if len(page["features"]) < ASSESSOR_PAGE_SIZE and not page.get("exceededTransferLimit"):
+                    break
+            with gzip.open(os.path.join(cache_dir, f"tile_{i}_{j}.json.gz"), "wt") as f:
+                json.dump(lots, f)
+            print(f"  Assessor tile {i},{j}: {len(lots)} lots", flush=True)
+
+
+def read_assessor(cache_dir):
+    """Lots that have an outline. A few records in the layer have none."""
+    lots = []
+    for name in sorted(os.listdir(cache_dir)):
+        if name.endswith(".json.gz"):
+            with gzip.open(os.path.join(cache_dir, name), "rt") as f:
+                lots.extend(lot for lot in json.load(f) if (lot.get("geometry") or {}).get("rings"))
+    return lots
+
+
 # ---------------------------------------------------------------- CoStar
 
 def read_jsonl(path):
@@ -129,12 +179,13 @@ def read_costar(kit, boundary):
     company_names = {c["id"]: c.get("name") for c in read_jsonl(os.path.join(data, "company-detail.jsonl"))
                      if c["id"] in wanted}
     ids = {r["id"] for r in commercial}
-    apartment_managers = {a["propertyId"]: a.get("propertyManagementCompanyName")
-                          for a in read_jsonl(os.path.join(data, "apartment-listing.jsonl")) if a["propertyId"] in ids}
+    listings = {a["propertyId"]: a for a in read_jsonl(os.path.join(data, "apartment-listing.jsonl"))
+                if a["propertyId"] in ids}
+    apartment_managers = {i: a.get("propertyManagementCompanyName") for i, a in listings.items()}
     properties = {}
     contacts = []
     for record in commercial:
-        row = br.commercial_property(record)
+        row = br.commercial_property(record, (listings.get(record["id"]) or {}).get("totalNumUnits"))
         properties[row["costar_id"]] = row
         contacts.extend(br.contacts_for(record, company_names, apartment_managers.get(record["id"])))
     for record in read_jsonl(os.path.join(data, "residential-listings.jsonl")):
@@ -180,6 +231,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="build rows and print counts, send nothing")
     parser.add_argument("--costar-kit", default=os.path.join(ROOT, "data", "costar-kit"))
     parser.add_argument("--cache", default=os.path.join(ROOT, "data", "cache", "vexcel_hollywood"))
+    parser.add_argument("--assessor-cache", default=os.path.join(ROOT, "data", "cache", "assessor_hollywood"))
     parser.add_argument("--boundary", default=os.path.join(here, "hollywood_boundary.geojson"),
                         help="GeoJSON file; its first feature is the area to load")
     args = parser.parse_args()
@@ -199,8 +251,12 @@ def main():
         print("Fetching Vexcel parcels (first run only)...")
         fetch_vexcel(boundary, args.cache, env["VEXCEL_API_KEY"])
     parcels = read_vexcel(args.cache)
+    if not os.path.isdir(args.assessor_cache) or not os.listdir(args.assessor_cache):
+        print("Fetching County Assessor lots (first run only)...")
+        fetch_assessor(boundary, args.assessor_cache)
+    lots = read_assessor(args.assessor_cache)
     properties, contacts = read_costar(args.costar_kit, boundary)
-    buildings = br.build(parcels, properties)
+    buildings = br.build(parcels, properties, lots)
     rs.score_rows(buildings, {p["costar_id"] for p in properties if p.get("is_senior_housing")})
 
     by_source = {}
@@ -213,6 +269,7 @@ def main():
           f"accessory: {sum(1 for b in buildings if b['is_accessory'])}, "
           f"height suspect: {sum(1 for b in buildings if b['height_suspect'])}")
     print(f"  units source: {by_source}")
+    print(f"  on a County Assessor lot: {sum(1 for b in buildings if b['assessor_ain'])}")
     scored = [b["risk_score"] for b in buildings if b["risk_score"]]
     print(f"  risk score: {len(scored)} above 0 (highest {max(scored, default=0)}), "
           f"{sum(1 for b in buildings if b['risk_score'] == 0)} at 0, "

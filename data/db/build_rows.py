@@ -34,6 +34,13 @@ COSTAR_HOME_TYPE = {1: "single_family", 2: "single_family", 64: "single_family"}
 COSTAR_MATERIAL = {1: "masonry", 2: "metal", 3: "reinforced_concrete", 4: "steel", 5: "wood_frame",
                    6: "masonry", 7: "masonry"}
 MATTERPORT_REFERENCE_TYPES = {36, 234}
+ASSESSOR_USE_TYPE = {"Commercial": "commercial", "Recreational": "commercial", "Industrial": "industrial",
+                     "Institutional": "institutional", "Government": "institutional"}
+# The Assessor unit count of a lot is a count of homes on residential lots and on lots with these descriptions.
+# On other lots it also counts shops or suites, so we do not use it.
+ASSESSOR_HOME_DESCRIPTIONS = {"Store Combination", "Homes For Aged & Others"}
+ASSESSOR_UNKNOWN_UNITS = 999            # placeholder on the tax roll, for example a single home with 1 + 999 units
+LOT_CELL_DEG = 0.002                    # size of a cell of the lot lookup grid, about 200 m
 _NAMESPACE = uuid.UUID("6f1b0c1e-59a0-4c59-9d0e-0b6a3c1d7e59")
 
 
@@ -153,8 +160,13 @@ def _street_address(a):
     return " ".join(str(p).strip() for p in parts if p) or None
 
 
-def commercial_property(record):
-    """One line of commercial-property.jsonl -> a costar_properties row."""
+def commercial_property(record, listing_units=None):
+    """One line of commercial-property.jsonl -> a costar_properties row.
+
+    listing_units: the unit count of the property in apartment-listing.jsonl, used when it has no floor plans.
+    The unit count is the sum of the floor plans. propertyApartment.totalNumUnits is not used: it counts only the
+    units listed one by one, and is far too low for most properties (DATABASE.md, problem 36).
+    """
     a = record["primaryAddress"]
     apt = record.get("propertyApartment") or {}
     blocks = [record.get(k) or {} for k in ("propertyApartment", "propertyOffice", "propertyRetail",
@@ -166,6 +178,7 @@ def commercial_property(record):
             elevators = (elevators or 0) + count
     height_ft = record.get("buildingHeightInFeet")
     hotel = record.get("propertyHospitality") or {}
+    floor_plan_units = sum(plan.get("numUnits") or 0 for plan in apt.get("models") or [])
     return {
         "costar_id": str(record["id"]),
         "kind": "commercial",
@@ -181,7 +194,7 @@ def commercial_property(record):
         "height_m": round(height_ft * 0.3048, 1) if height_ft else None,
         "year_built": _year_built(record),
         "construction_material": COSTAR_MATERIAL.get(record.get("buildingConstructionMaterial")),
-        "total_units": apt.get("totalNumUnits") or hotel.get("numUnits") or None,
+        "total_units": floor_plan_units or listing_units or hotel.get("numUnits") or None,
         "floor_area_sqft": record.get("grossBuildingAreaSquareFeet"),
         "is_walkup": apt.get("isWalkup"),
         "passenger_elevators": elevators,
@@ -310,6 +323,71 @@ _VEXCEL_COLUMNS = ("parcel_key", "footprint", "footprint_area_m2", "ground_eleva
                    "vexcel_survey_date")
 
 
+# ---------------------------------------------------------------- County Assessor
+
+def assessor_lot(feature):
+    """One feature of the Los Angeles County parcel layer (the tax record of one lot) -> the values we keep."""
+    a = feature["attributes"]
+    slots = range(1, 6)                 # the record describes up to 5 buildings on the lot
+    has_homes = a.get("UseType") == "Residential" or a.get("UseDescription") in ASSESSOR_HOME_DESCRIPTIONS
+    years = [int(y) for y in (str(a.get(f"YearBuilt{n}") or "") for n in slots) if y.isdigit() and int(y) > 1800]
+    units = [a.get(f"Units{n}") or 0 for n in slots]
+    return {"ain": a["AIN"], "rings": [[(p[0], p[1]) for p in ring] for ring in feature["geometry"]["rings"]],
+            "use_type": a.get("UseType"), "use_description": a.get("UseDescription"),
+            "units": sum(u for u in units if u != ASSESSOR_UNKNOWN_UNITS) if has_homes else 0,
+            "bedrooms": sum(a.get(f"Bedrooms{n}") or 0 for n in slots),
+            "year_built": min(years, default=None)}
+
+
+def index_lots(lots):
+    """Grid of lots for a fast lookup by point. A lot that comes twice (it lies in two tiles) is kept once."""
+    grid, seen = {}, set()
+    for lot in lots:
+        if lot["ain"] in seen:
+            continue
+        seen.add(lot["ain"])
+        xs = [x for ring in lot["rings"] for x, _ in ring]
+        ys = [y for ring in lot["rings"] for _, y in ring]
+        lot["bounds"] = (min(xs), min(ys), max(xs), max(ys))
+        for i in range(int(min(xs) // LOT_CELL_DEG), int(max(xs) // LOT_CELL_DEG) + 1):
+            for j in range(int(min(ys) // LOT_CELL_DEG), int(max(ys) // LOT_CELL_DEG) + 1):
+                grid.setdefault((i, j), []).append(lot)
+    return grid
+
+
+def lots_at(grid, lng, lat):
+    """Every lot that contains the point. The units of a condominium are separate lots with one shared outline."""
+    found = []
+    for lot in grid.get((int(lng // LOT_CELL_DEG), int(lat // LOT_CELL_DEG)), ()):
+        west, south, east, north = lot["bounds"]
+        if west <= lng <= east and south <= lat <= north \
+                and sum(_in_ring(lng, lat, ring) for ring in lot["rings"]) % 2:     # odd: inside and not in a hole
+            found.append(lot)
+    return found
+
+
+def merge_lots(lots):
+    """The lots under one structure as one record, or None when there is no lot."""
+    if not lots:
+        return None
+    main = min(lots, key=lambda lot: (-lot["units"], lot["ain"]))
+    years = [lot["year_built"] for lot in lots if lot["year_built"]]
+    return {"key": tuple(sorted(lot["ain"] for lot in lots)), "ain": main["ain"], "use_type": main["use_type"],
+            "use_description": main["use_description"], "units": sum(lot["units"] for lot in lots),
+            "bedrooms": sum(lot["bedrooms"] for lot in lots), "year_built": min(years, default=None)}
+
+
+def assessor_building_type(lot):
+    """Our building type for a merged lot, or None when the tax record does not say."""
+    if lot["units"] >= 2:
+        return "multi_family"
+    if lot["use_type"] == "Residential":
+        return "single_family" if lot["use_description"] == "Single" else "multi_family"
+    if lot["use_description"] == "Hotel & Motels":
+        return "hotel"
+    return ASSESSOR_USE_TYPE.get(lot["use_type"])
+
+
 # ---------------------------------------------------------------- resolve
 
 def split_units(total, weights):
@@ -326,8 +404,12 @@ def split_units(total, weights):
     return parts
 
 
-def resolve(row, prop=None, units_share=None):
-    """Fill the resolved columns of one buildings row. prop is its costar_properties row, or None."""
+def resolve(row, prop=None, units_share=None, lot=None, lot_units=None):
+    """Fill the resolved columns of one buildings row.
+
+    prop: its costar_properties row, or None. units_share: its part of the CoStar unit count, or None.
+    lot: the merged Assessor lot under the structure, or None. lot_units: its part of the homes on that lot, or None.
+    """
     prop = prop or {}
     vexcel_type = row.get("vexcel_building_type")
     vexcel_height = row.get("vexcel_height_m")
@@ -336,8 +418,11 @@ def resolve(row, prop=None, units_share=None):
                              and not row["is_accessory"])
     usable_height = vexcel_height if vexcel_height is not None and not row["height_suspect"] else None
 
+    lot_type = assessor_building_type(lot) if lot and not row["is_accessory"] else None
     if prop.get("property_type"):
         row["building_type"], row["building_type_source"] = prop["property_type"], "costar"
+    elif lot_type:
+        row["building_type"], row["building_type_source"] = lot_type, "assessor"
     elif VEXCEL_TYPE.get(vexcel_type):
         row["building_type"], row["building_type_source"] = VEXCEL_TYPE[vexcel_type], "vexcel"
     else:
@@ -364,6 +449,8 @@ def resolve(row, prop=None, units_share=None):
         row["units"], row["units_source"] = units_share, "costar"
     elif row["is_accessory"]:
         row["units"], row["units_source"] = None, None
+    elif lot_units is not None:
+        row["units"], row["units_source"] = lot_units, "assessor"
     elif row["building_type"] == "single_family":
         row["units"], row["units_source"] = 1, "estimated"
     elif row["building_type"] == "multi_family" and area and row["floors"]:
@@ -377,8 +464,21 @@ def resolve(row, prop=None, units_share=None):
     else:
         row["est_occupants"], row["occupants_source"] = None, None
 
-    for column in ("construction_material", "year_built", "is_walkup", "passenger_elevators", "has_sprinklers"):
+    for column in ("construction_material", "is_walkup", "passenger_elevators", "has_sprinklers"):
         row[column] = prop.get(column)
+    if prop.get("year_built"):
+        row["year_built"], row["year_built_source"] = prop["year_built"], "costar"
+    elif lot and lot["year_built"]:
+        row["year_built"], row["year_built_source"] = lot["year_built"], "assessor"
+    else:
+        row["year_built"], row["year_built_source"] = None, None
+    lot = lot or {}
+    row["assessor_ain"] = lot.get("ain")
+    row["assessor_use_type"] = lot.get("use_type")
+    row["assessor_use_description"] = lot.get("use_description")
+    row["assessor_units"] = lot.get("units") or None                # 0 on the tax roll means "not known"
+    row["assessor_bedrooms"] = lot.get("bedrooms") or None
+    row["assessor_year_built"] = lot.get("year_built")
     row["costar_id"] = prop.get("costar_id")
     row.setdefault("shares_costar_property", False)
     sources = [row["building_type_source"], row["height_source"], row["floors_source"], row["units_source"]]
@@ -386,12 +486,20 @@ def resolve(row, prop=None, units_share=None):
     return row
 
 
-def build(parcel_features, properties):
-    """All buildings rows for the given Vexcel parcels and costar_properties rows.
+def _size(structure):
+    """Weight of a structure when a unit count is split: footprint area x height."""
+    return (structure.get("footprint_area_m2") or 0) * max(structure.get("vexcel_height_m") or 0, SUSPECT_HEIGHT_M)
+
+
+def build(parcel_features, properties, lot_features=()):
+    """All buildings rows for the given Vexcel parcels, costar_properties rows and County Assessor lots.
 
     A CoStar property goes to the parcel that contains its point. Its values go to every structure on that parcel
     that is not a shed or garage (to all structures when there are only sheds and garages). Units are split by
     footprint area x height. A property with no parcel, or a parcel with no structure, gets its own row.
+
+    An Assessor lot goes to every structure whose center is inside it. The homes of the lot that CoStar did not
+    count go to its structures that have no CoStar unit count and are not a shed or garage, split the same way.
     """
     parcels = []
     for feature in parcel_features:
@@ -410,7 +518,7 @@ def build(parcel_features, properties):
         else:
             unmatched.append(prop)
 
-    rows = []
+    pending = []                                        # (structure, its CoStar property, its CoStar units)
     for parcel in parcels:
         structures = parcel["structures"]
         prop = parcel["props"][0] if parcel["props"] else None
@@ -418,15 +526,28 @@ def build(parcel_features, properties):
         targets = [s for s in structures if s["vexcel_building_type"] not in ACCESSORY_TYPES] or structures
         shares = {}
         if prop and prop.get("total_units"):
-            weights = [(s.get("footprint_area_m2") or 0) * max(s.get("vexcel_height_m") or 0, SUSPECT_HEIGHT_M)
-                       for s in targets]
-            shares = {s["id"]: u for s, u in zip(targets, split_units(prop["total_units"], weights))}
+            shares = {s["id"]: u for s, u in zip(targets, split_units(prop["total_units"], [_size(s) for s in targets]))}
         target_ids = {s["id"] for s in targets}
         for s in structures:
             attached = prop if prop and s["id"] in target_ids else None
             s["shares_costar_property"] = bool(attached) and len(targets) > 1
-            rows.append(resolve(s, attached, shares.get(s["id"])))
+            pending.append((s, attached, shares.get(s["id"])))
 
+    grid = index_lots([assessor_lot(f) for f in lot_features])
+    lot_of, on_lot = {}, {}
+    for s, _, costar_units in pending:
+        lot_of[s["id"]] = lot = merge_lots(lots_at(grid, s["lng"], s["lat"]))
+        if lot and lot["units"] and s["vexcel_building_type"] not in ACCESSORY_TYPES:
+            on_lot.setdefault(lot["key"], []).append((s, costar_units))
+    lot_units = {}
+    for members in on_lot.values():
+        homes = lot_of[members[0][0]["id"]]["units"]
+        left = max(0, homes - sum(units or 0 for _, units in members))
+        targets = [s for s, units in members if units is None]
+        lot_units.update({s["id"]: u for s, u in zip(targets, split_units(left, [_size(s) for s in targets]))})
+
+    rows = [resolve(s, attached, costar_units, lot_of[s["id"]], lot_units.get(s["id"]))
+            for s, attached, costar_units in pending]
     for prop in unmatched:
         row = {column: None for column in _VEXCEL_COLUMNS}
         row.update({"id": str(uuid.uuid5(_NAMESPACE, f"costar:{prop['costar_id']}")),

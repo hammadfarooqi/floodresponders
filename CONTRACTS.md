@@ -87,7 +87,7 @@ or CoStar while it runs.
 - **Two sets of columns.** `buildings` keeps the measured Vexcel values, and a second set of resolved values that
   the app uses (`height_m`, `floors`, `units`, `est_occupants`, `building_type`). Each resolved value has a
   `*_source` column, and each row has a `confidence` from 0 to 1.
-- **Order of trust:** CoStar first, then the Assessor (not loaded yet), then Vexcel, then our own estimate.
+- **Order of trust:** CoStar first, then the County Assessor, then Vexcel, then our own estimate.
 - **Null means "not known".** It never means "no" or zero.
 - **Not stored:** fire arrival times, assignments and call data. They depend on the run and belong to
   phases 4 to 6. The risk score is stored, because it uses building data only (phase 3).
@@ -132,13 +132,15 @@ or CoStar while it runs.
 - **Every weight is in `WEIGHTS`** in that file and is listed in `DATABASE.md`. All are first guesses that nobody
   has checked against a real fire yet. Do not put a second copy of a weight in other code.
 - **Missing values.** A value that is not known takes the typical value for the building type; it never makes
-  the score zero. Sheds and garages (`is_accessory`) score 0. Commercial, office, retail and industrial
-  structures have a null `risk_score`, because nobody has an estimate of the people inside. Sort with nulls last.
+  the score zero. Sheds and garages (`is_accessory`) score 0. Commercial, industrial, hotel and
+  institutional structures (schools, hospitals, government) have a null `risk_score`, because nobody has an
+  estimate of the people inside. Sort with nulls last.
 - **Show confidence with the score.** Most occupant numbers are estimates. "High priority, low confidence" is a
   correct result, and a call (phase 6) is how the system learns more about that building.
 - **Flags for the responder.** These exist on CoStar rows only: `floors`, `is_walkup`, `passenger_elevators`,
-  `has_sprinklers`, `construction_material`, `year_built`. Fire escapes, stairwells and exits are not in the
-  database. Matterport has interior data for under 1% of buildings.
+  `has_sprinklers`, `construction_material`. `year_built` and the use of the lot (`assessor_use_description`:
+  school, hospital, care home, hotel) come from the County Assessor for most rows. Fire escapes, stairwells and
+  exits are not in the database. Matterport has interior data for under 1% of buildings.
 
 ### Phase 4: Matching and routing
 
@@ -355,7 +357,7 @@ database:** it lists how each value is chosen and the known data problems.
 
 | Table or view | One row is | Key columns |
 |---|---|---|
-| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect`; `risk_score`, `people_at_risk`, `structure_factor` |
+| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect`; `risk_score`, `people_at_risk`, `structure_factor`; `assessor_ain`, `assessor_use_type`, `assessor_use_description`, `assessor_units` |
 | `costar_properties` (300) | One CoStar property, with CoStar's own values | `costar_id`, `name`, `address`, `floors`, `total_units`, `is_walkup`, `passenger_elevators`, `matterport_model_ids` |
 | `contacts` (436) | Site office or property manager of a CoStar property | `costar_id`, `role`, `company_name`, `phone`, `is_test_number` |
 | `buildings_geojson` | `buildings` plus `footprint_geojson` | Use this to draw outlines |
@@ -363,7 +365,7 @@ database:** it lists how each value is chosen and the known data problems.
 
 Row security is on with no rules: only `SUPABASE_SECRET_KEY` (server code) can read or write.
 `DemoBuilding` above is still the shape the API serves. `DATABASE.md` lists where the database differs from it
-(area, floor height, no Assessor data yet).
+(area, floor height).
 
 ## Agent interface (draft)
 

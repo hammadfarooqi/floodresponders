@@ -184,3 +184,18 @@ def test_worked_examples_keep_their_order():
     assert risks == sorted(risks, reverse=True)
     assert len(set(risks)) == 4
     assert scored[1]["risk_score"] > 10 * scored[2]["risk_score"]       # no house outranks a 40-unit block
+
+
+def test_institutional_type_from_a_record_is_not_filled_in_as_housing():
+    """A photo guess of "institutional" is often a home. A tax or CoStar record of it is a school or a church."""
+    for source in ("assessor", "costar"):
+        row = building(building_type="institutional", building_type_source=source, units=None, units_source=None)
+        assert rs.people_at_risk(row) is None
+    guess = building(building_type="institutional", building_type_source="vexcel", units=None, units_source=None)
+    assert rs.people_at_risk(guess) > 0
+    care_home = building(building_type="institutional", building_type_source="assessor", units=30, units_source="assessor")
+    assert rs.people_at_risk(care_home) == pytest.approx(30 * 2.4 * 0.95 * 0.10)
+
+
+def test_assessor_units_are_not_capped():
+    assert rs.people_at_risk(building(units=450, units_source="assessor")) == pytest.approx(450 * 2.4 * 0.95 * 0.10)
