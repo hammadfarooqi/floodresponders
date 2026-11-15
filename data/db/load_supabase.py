@@ -29,8 +29,9 @@ import risk_score as rs
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VEXCEL_URL = "https://api.vexcelgroup.com/v2/property/extract"
 ASSESSOR_URL = "https://public.gis.lacounty.gov/public/rest/services/LACounty_Cache/LACounty_Parcel/MapServer/0/query"
-ASSESSOR_FIELDS = ["AIN", "UseType", "UseDescription"] + [f"{name}{n}" for n in range(1, 6)
-                                                         for name in ("Units", "YearBuilt", "Bedrooms")]
+ASSESSOR_FIELDS = (["AIN", "UseType", "UseDescription", "SitusHouseNo", "SitusFraction", "SitusDirection",
+                    "SitusStreet"]
+                   + [f"{name}{n}" for n in range(1, 6) for name in ("Units", "YearBuilt", "Bedrooms", "SQFTmain")])
 ASSESSOR_TILES_PER_SIDE = 6
 ASSESSOR_PAGE_SIZE = 1000               # the most the service returns in one answer
 USER_AGENT = "rollcall-loader"
@@ -255,6 +256,9 @@ def main():
         print("Fetching County Assessor lots (first run only)...")
         fetch_assessor(boundary, args.assessor_cache)
     lots = read_assessor(args.assessor_cache)
+    if lots and "SitusStreet" not in lots[0]["attributes"]:
+        sys.exit(f"The Assessor cache at {args.assessor_cache} has no address fields. Delete the folder and run "
+                 "again, or the upload would empty assessor_address and assessor_sqft.")
     properties, contacts = read_costar(args.costar_kit, boundary)
     buildings = br.build(parcels, properties, lots)
     rs.score_rows(buildings, {p["costar_id"] for p in properties if p.get("is_senior_housing")})

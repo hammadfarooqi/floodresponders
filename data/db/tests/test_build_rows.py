@@ -153,6 +153,28 @@ def test_residential_property():
     assert br.residential_property({"property": {"address": {}}}) is None
 
 
+def test_vexcel_roof_details_and_confidence():
+    extra = {"roof-characteristics.tree-cover.percent": 12.5, "roof-defects.structural-damage.detected": True,
+             "roof-defects.missing-material.detected": False, "roof-defects.tarp.detected": True,
+             "roof-defects.debris.detected": False, "roof-objects.solar.value": True, "building-type.score": 0.58,
+             "roof-characteristics.material.score": 0.81, "roof-characteristics.shape.score": 0.99}
+    row = br.build([parcel(0, 0, [{**structure(0.0001, 0.0001), **extra}])], [])[0]
+    assert row["roof_tree_cover_pct"] == 12.5 and row["has_solar_panels"] is True
+    assert (row["roof_structural_damage"], row["roof_missing_material"]) == (True, False)
+    assert (row["roof_tarp"], row["roof_debris"]) == (True, False)
+    assert row["vexcel_type_confidence"] == 0.58
+    assert (row["roof_material_confidence"], row["roof_shape_confidence"]) == (0.81, 0.99)
+
+
+def test_vexcel_roof_details_are_null_when_vexcel_sends_none():
+    row = br.build([parcel(0, 0, [structure(0.0001, 0.0001)])], [])[0]
+    for column in ("roof_tree_cover_pct", "roof_structural_damage", "roof_tarp", "has_solar_panels",
+                   "vexcel_type_confidence"):
+        assert row[column] is None
+    only_costar = br.build([], [prop(-118.3, 34.1)])[0]
+    assert only_costar["roof_tarp"] is None and only_costar["vexcel_type_confidence"] is None
+
+
 # ---------------------------------------------------------------- CoStar unit count
 
 def apartment_record(**apartment):
@@ -171,13 +193,29 @@ def test_costar_units_come_from_the_floor_plans_not_from_total_num_units():
     assert br.commercial_property(hotel)["total_units"] == 120
 
 
+def test_costar_rent_vacancy_style_and_lot_number():
+    record = apartment_record(vacancyPercent=4, apartmentRentType=3, numBuildings=2, apartmentStyleType=4)
+    record["parcelNumbers"] = ["5548-007-014", "5548-007-015"]
+    row = br.commercial_property(record)
+    assert row["vacancy_pct"] == 4 and row["rent_type"] == "mixed" and row["num_buildings"] == 2
+    assert row["apartment_style"] == "low_rise" and row["parcel_number"] == "5548007014"
+    assert br.commercial_property(apartment_record(apartmentRentType=2))["rent_type"] == "affordable"
+    plain = br.commercial_property(apartment_record(apartmentRentType=0, apartmentStyleType=0))
+    for column in ("vacancy_pct", "rent_type", "num_buildings", "apartment_style", "parcel_number"):
+        assert plain[column] is None
+    assert br.commercial_property(apartment_record(vacancyPercent=0))["vacancy_pct"] == 0     # 0 = full, not unknown
+    home = br.residential_property({"property": {"address": {"id": 5, "latitude": 34.1, "longitude": -118.3}}})
+    assert home["rent_type"] is None and home["parcel_number"] is None
+
+
 # ---------------------------------------------------------------- County Assessor
 
 def lot(x, y, size=0.001, ain="5000000001", use_type="Residential", description="Five or more apartments",
-        units=(12,), years=("1960",), bedrooms=(20,)):
+        units=(12,), years=("1960",), bedrooms=(20,), sqft=(), **address):
     """One feature of the county parcel layer, in the shape the service returns."""
-    attributes = {"AIN": ain, "UseType": use_type, "UseDescription": description}
+    attributes = {"AIN": ain, "UseType": use_type, "UseDescription": description, **address}
     for n in range(1, 6):
+        attributes[f"SQFTmain{n}"] = sqft[n - 1] if n <= len(sqft) else None
         attributes[f"Units{n}"] = units[n - 1] if n <= len(units) else None
         attributes[f"YearBuilt{n}"] = years[n - 1] if n <= len(years) else None
         attributes[f"Bedrooms{n}"] = bedrooms[n - 1] if n <= len(bedrooms) else None
@@ -312,3 +350,20 @@ def test_assessor_placeholder_999_is_not_a_unit_count():
     only_placeholder = one("single_family", lots=[lot(0, 0, description="Single", units=(999,))])
     assert (only_placeholder["units"], only_placeholder["units_source"]) == (1, "estimated")
     assert only_placeholder["assessor_units"] is None
+
+
+def test_assessor_address_and_floor_area():
+    row = one(lots=[lot(0, 0, sqft=(9000, 1500), SitusHouseNo="1645", SitusFraction=" ", SitusDirection="N",
+                        SitusStreet="TEST ST")])
+    assert row["assessor_address"] == "1645 N TEST ST" and row["assessor_sqft"] == 10500
+    bare = one(lots=[lot(0, 0, SitusHouseNo=" ", SitusStreet=" ")])
+    assert bare["assessor_address"] is None and bare["assessor_sqft"] is None
+    old_cache = one(lots=[lot(0, 0)])                       # a cache made before these fields were fetched
+    assert old_cache["assessor_address"] is None and old_cache["assessor_sqft"] is None
+
+
+def test_stacked_condo_lots_share_one_address_and_add_their_floor_area():
+    street = {"SitusHouseNo": "7", "SitusDirection": " ", "SitusStreet": "TEST AVE"}
+    condos = [lot(0, 0, ain=f"500000000{n}", description="Single", units=(1,), sqft=(900,), **street) for n in (1, 2, 3)]
+    row = one(lots=condos)
+    assert row["assessor_address"] == "7 TEST AVE" and row["assessor_sqft"] == 2700

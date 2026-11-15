@@ -30,8 +30,18 @@ create table if not exists costar_properties (
   has_sprinklers        boolean,
   has_basement          boolean,              -- homes only
   has_accessibility_features boolean,         -- homes only
+  vacancy_pct           numeric,              -- apartments: percent of units that are empty; 0 = full
+  rent_type             text,                 -- apartments: 'market' | 'affordable' | 'mixed'
+  num_buildings         int,                  -- apartments: buildings that make up the property
+  apartment_style       text,                 -- 'low_rise', 'mid_rise', 'high_rise', 'garden', ...
+  parcel_number         text,                 -- first county lot number, digits only (same form as assessor_ain)
   matterport_model_ids  text[] not null default '{}'
 );
+alter table costar_properties add column if not exists vacancy_pct numeric;
+alter table costar_properties add column if not exists rent_type text;
+alter table costar_properties add column if not exists num_buildings int;
+alter table costar_properties add column if not exists apartment_style text;
+alter table costar_properties add column if not exists parcel_number text;
 
 -- One row per Vexcel structure, plus one row per CoStar property that has no Vexcel structure.
 create table if not exists buildings (
@@ -52,6 +62,15 @@ create table if not exists buildings (
   roof_condition        int,                  -- 1 to 5; direction not documented (see DATABASE.md)
   roof_material         text,
   roof_shape            text,
+  roof_tree_cover_pct   numeric,              -- percent of the roof under tree branches
+  roof_structural_damage boolean,             -- Vexcel sees this defect on the roof
+  roof_missing_material boolean,
+  roof_tarp             boolean,
+  roof_debris           boolean,
+  has_solar_panels      boolean,
+  vexcel_type_confidence numeric,             -- 0 to 1: how sure Vexcel is of vexcel_building_type
+  roof_material_confidence numeric,           -- 0 to 1
+  roof_shape_confidence numeric,              -- 0 to 1
   tree_density_zone1    numeric,              -- rings around the structure, nearest first
   tree_density_zone2    numeric,
   tree_density_zone3    numeric,
@@ -73,6 +92,8 @@ create table if not exists buildings (
   assessor_units        int,                  -- homes on the lot; null = not known
   assessor_bedrooms     int,
   assessor_year_built   int,
+  assessor_address      text,                 -- street address of the lot, no unit number
+  assessor_sqft         int,                  -- floor area of the buildings on the lot, square feet
 
   -- Resolved values: what the app uses. *_source is 'costar', 'vexcel', 'assessor', 'estimated' or null.
   building_type         text,
@@ -110,6 +131,17 @@ alter table buildings add column if not exists assessor_use_description text;
 alter table buildings add column if not exists assessor_units int;
 alter table buildings add column if not exists assessor_bedrooms int;
 alter table buildings add column if not exists assessor_year_built int;
+alter table buildings add column if not exists assessor_address text;
+alter table buildings add column if not exists assessor_sqft int;
+alter table buildings add column if not exists roof_tree_cover_pct numeric;
+alter table buildings add column if not exists roof_structural_damage boolean;
+alter table buildings add column if not exists roof_missing_material boolean;
+alter table buildings add column if not exists roof_tarp boolean;
+alter table buildings add column if not exists roof_debris boolean;
+alter table buildings add column if not exists has_solar_panels boolean;
+alter table buildings add column if not exists vexcel_type_confidence numeric;
+alter table buildings add column if not exists roof_material_confidence numeric;
+alter table buildings add column if not exists roof_shape_confidence numeric;
 alter table buildings add column if not exists risk_score numeric;
 alter table buildings add column if not exists people_at_risk numeric;
 alter table buildings add column if not exists structure_factor numeric;

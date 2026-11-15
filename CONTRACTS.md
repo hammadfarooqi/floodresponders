@@ -357,7 +357,7 @@ database:** it lists how each value is chosen and the known data problems.
 
 | Table or view | One row is | Key columns |
 |---|---|---|
-| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect`; `risk_score`, `people_at_risk`, `structure_factor`; `assessor_ain`, `assessor_use_type`, `assessor_use_description`, `assessor_units` |
+| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect`; `risk_score`, `people_at_risk`, `structure_factor`; `assessor_ain`, `assessor_use_type`, `assessor_use_description`, `assessor_units`, `assessor_address` (street address for 40,161 rows) |
 | `costar_properties` (300) | One CoStar property, with CoStar's own values | `costar_id`, `name`, `address`, `floors`, `total_units`, `is_walkup`, `passenger_elevators`, `matterport_model_ids` |
 | `contacts` (436) | Site office or property manager of a CoStar property | `costar_id`, `role`, `company_name`, `phone`, `is_test_number` |
 | `facilities` (212) | One care home, nursing home, hospital, senior or affordable housing project, or school, from public lists | `kind`, `name`, `address`, `capacity`, `capacity_unit`, `lat`, `lng`, `building_id` (link to `buildings.id`), `building_distance_m` |
