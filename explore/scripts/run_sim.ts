@@ -23,9 +23,10 @@ for (const policy of ["calls", "nearest", "ours"] as const) {
   seedHidden(s);
   if (policy === "calls") { s.advanceTo(STUCK.call_min); s.addCall(STUCK.building_id); }
   if (policy === "ours") {
-    s.advanceTo(DECLINE.call_min); const a = driverDeclines(s);
-    s.advanceTo(STUCK.call_min); const b = tenantStuck(s);
-    if (process.env.SHOW) for (const l of [...a, ...b]) console.log(`  [${l.t.toFixed(1)}] ${l.speaker}${l.to ? " → " + l.to : ""}: ${l.text}`);
+    // the two scripted calls, in time order (as the page plays them)
+    const moments = [{ t: DECLINE.call_min, fn: driverDeclines }, { t: STUCK.call_min, fn: tenantStuck }].sort((x, y) => x.t - y.t);
+    const said = moments.flatMap(mo => { s.advanceTo(mo.t); return mo.fn(s); });
+    if (process.env.SHOW) for (const l of said) console.log(`  [${l.t.toFixed(1)}] ${l.speaker}${l.to ? " → " + l.to : ""}: ${l.text}`);
   }
   s.advanceTo(180);
   const sb = s.byId.get(STUCK.building_id);

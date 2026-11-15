@@ -9,12 +9,28 @@ export interface Line { t: number; speaker: "Roll Call" | "Driver" | "Supervisor
 export const STUCK = {
   building_id: "16356373b879",  // Lanewood Court Apartments (CoStar, 5 stories, manager phone on file), fire ~136 min
   count: 3,
-  call_min: 100,
+  call_min: 6,                  // 0:06: with the slower, smaller fire Roll Call reaches every building by ~0:25, so the call must come first
 };
-export const DECLINE = { call_min: 35, out_min: 25 };
+const PREFERRED_STUCK = STUCK.building_id;
+
+/** The stuck-tenants building must be one this fire reaches, some time after the call. Lanewood Court when the fire
+ *  reaches it; otherwise (a slower or other fire) the CoStar building (manager phone on file) whose fire arrival is
+ *  closest to 36 min after the call. Deterministic, so both runs pick the same building. */
+function pickStuckBuilding(sim: Simulation): string {
+  const ok = (b: Simulation["buildings"][number]) => b.fire >= STUCK.call_min + 20 && b.node >= 0;
+  const pref = sim.byId.get(PREFERRED_STUCK);
+  if (pref && ok(pref)) return pref.id;
+  const want = STUCK.call_min + 36;
+  const pool = sim.buildings.filter(b => ok(b) && b.costar);
+  const cands = pool.length ? pool : sim.buildings.filter(ok);
+  cands.sort((a, b) => Math.abs(a.fire - want) - Math.abs(b.fire - want) || (a.id < b.id ? -1 : 1));
+  return cands[0]?.id ?? PREFERRED_STUCK;
+}
+export const DECLINE = { call_min: 12, out_min: 25 };   // 0:12: trucks are still driving with the slower, smaller fire (at 0:35 all were done)
 
 /** Call once at the start of BOTH runs: the stuck tenants are real in both worlds. */
 export function seedHidden(sim: Simulation) {
+  STUCK.building_id = pickStuckBuilding(sim);
   sim.addHiddenNeed(STUCK.building_id, STUCK.count);
 }
 

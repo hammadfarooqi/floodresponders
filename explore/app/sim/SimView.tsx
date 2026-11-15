@@ -246,7 +246,7 @@ export default function SimView() {
             <tr><td>AI choice</td><td>pair value = risk ÷ (drive min + min on scene + 1); best pair first</td></tr>
             <tr><td>AI re-match</td><td>every {cfg.rematch_every_min} min and after every call</td></tr>
             <tr><td>People per building</td><td>units × 2.4 × 0.95; need help = 10% (estimate, BUILDING_MODEL.md)</td></tr>
-            <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (about 130°); the front stops at Hollywood Blvd at 3:00 (crews hold the line)</td></tr>
+            <tr><td>Fire</td><td>Sunset Fire origin, wind toward Hollywood (about 130°); front 0.9 km/h in brush, slower between buildings (FIRE_SPEED 0.4: chosen so the toll is in the tens, like real LA fires); stops at 3:00 (crews hold the line), 316 acres</td></tr>
             <tr><td>911 calls</td><td>{Math.round(cfg.call_share * 100)}% of buildings with people who need help call, {cfg.call_lead_min[0]}–{cfg.call_lead_min[1]} min before the fire reaches them; {cfg.call_takers} call-takers, {cfg.call_handle_min} min per call, answered in order (same calls in both runs)</td></tr>
             <tr><td>Today</td><td>oldest answered call → closest free truck by road (CAD + GPS); trucks do not re-plan; buildings that never call get no truck</td></tr>
             <tr><td>Agent calls</td><td>scripted demo words; effects are simulated. {STUCK.count} stuck tenants exist in both runs; in run 1 the supervisor calls 911</td></tr>

@@ -1,7 +1,7 @@
 # Roll Call: what to say to the judges
 
 About 3 minutes of talk, then answers to likely questions. Short sentences. Numbers are from
-`node explore/scripts/run_sim.ts` with the default assumptions (fire stops at Hollywood Blvd).
+`node explore/scripts/run_sim.ts` with the default assumptions (FIRE_SPEED 0.4).
 
 ---
 
@@ -29,7 +29,7 @@ Say: "To test the idea, we built a simulation of one fire. Every step uses real 
 
 1. **The fire.** The real Sunset Fire start point (Runyon Canyon, 8 Jan 2025), with a stronger wind toward
    Hollywood. The fire spreads over a 30 m grid: fast in brush, slower between buildings, faster downwind.
-   Crews stop it at Hollywood Blvd after 3 hours. From this we know **the minute the fire reaches each building**.
+   It moves about 1 km/h in the brush and slower between buildings; crews stop it after 3 hours. From this we know **the minute the fire reaches each building**.
 2. **The people.** 1,527 buildings with people are in the fire's path: about **21,600 people**, and about
    **1,900 who need help** (people per building = units × 2.4 × 95% occupied; need help = 10%).
    Everyone gets the evacuation order at minute 0.
@@ -67,19 +67,19 @@ of truck time?"
 - It **re-plans every 5 minutes and after every phone call**, because the fire and the trucks keep moving.
 
 Two calls in the demo show this:
-- At 0:35 a driver says "we can't go, we're on a cardiac call". The AI marks the truck out of service and moves
+- At 0:12 a driver says "we can't go, we're on a cardiac call". The AI marks the truck out of service and moves
   the building to another truck.
-- At 1:40 a building manager says "a tenant in a wheelchair is stuck on the 4th floor". The AI adds 3 people who
+- At 0:06 a building manager (1865 N Fuller Apartments) says "a tenant in a wheelchair is stuck on the 4th floor". The AI adds 3 people who
   need help, re-plans, sends the nearest truck, and calls the manager back with the arrival time.
 
 ## 5. The result (15 s)
 
 | Same fire, people, calls and trucks | Today (911 calls) | Roll Call |
 |---|---|---|
-| People trapped | 764 | 277 |
-| ... of them people who needed help | 591 | 104 |
+| People trapped | 48 | 4 |
+| ... of them people who needed help | 44 | 0 |
 
-"In this simulation, Roll Call leaves about **64% fewer people trapped**." While the run plays, point at the red
+"In this simulation, Roll Call leaves about **92% fewer people trapped**." While the run plays, point at the red
 phones: those are people waiting in the 911 queue. In the Roll Call run, trucks are often already on the way
 before anyone calls.
 
@@ -89,7 +89,7 @@ before anyone calls.
 - **Every assumption is on screen** (click "show assumptions"). Nothing is hidden in the code.
 - **We tried changing each assumption.** Fewer or more people calling 911 (40% to 100%), 2 to 10 call-takers,
   slower or faster crews, trucks at 20 or 45 km/h, people leaving more slowly, other random seeds. Today's dispatch
-  traps 419 to 909 people; Roll Call traps 94 to 407. **Roll Call is better in every case.** The exact numbers
+  traps 32 to 73 people; Roll Call traps 0 to 4. **Roll Call is better in every case.** The exact numbers
   change a lot; the direction does not.
 - **We say what it is not.** This is a simulation with assumptions. It is not a count of real lives saved, and
   the phone calls in the demo are scripted. The fire model ignores slope, wind gusts and embers.

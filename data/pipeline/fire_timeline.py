@@ -42,6 +42,9 @@ URBAN_FACTOR = 0.25                   # built-up cells burn at this share of the
 DENSITY_SLOWDOWN = 0.5                # ... and slower as building cover grows
 BRUSH_MAX_COVER = 0.05                # cells with < 5% building cover count as brush
 DURATION_MIN = 180                    # simulated fire length
+# FIRE_SPEED: after tuning, the spread rate is multiplied by this. 1 = the front reaches TARGET at DURATION_MIN;
+# 0.5 = half as fast, so in the same time it reaches less far and later (the fire still stops at DURATION_MIN).
+FIRE_SPEED = float(os.environ.get("FIRE_SPEED", "1"))
 ORDER_LEAD_MIN = 45                   # what-if evacuation order: where the fire would reach 45 min later
 WARNING_LEAD_MIN = 120                # what-if evacuation warning: where it would reach 2 h later
 ZONE_LB = 3.0                         # evacuation areas are drawn downwind-heavy: projection uses a longer ellipse
@@ -213,9 +216,9 @@ def main():
         mid = (lo + hi) / 2
         at = arrival(mid)[ti][tj]
         lo, hi = (mid, hi) if at > DURATION_MIN else (lo, mid)
-    head = hi
+    head = hi * FIRE_SPEED
     t = arrival(head)
-    print(f"head rate {head:.1f} m/min ({head * 0.06:.2f} km/h in brush); wind toward {wind:.0f} deg; "
+    print(f"FIRE_SPEED {FIRE_SPEED}; head rate {head:.1f} m/min ({head * 0.06:.2f} km/h in brush); wind toward {wind:.0f} deg; "
           f"target reached at {t[ti][tj]:.0f} min")
 
     # fronts: per step, the burned cells as row runs merged into rectangles (MultiPolygon)
@@ -252,7 +255,7 @@ def main():
         "wind_from_deg": round((wind + 180) % 360, 1), "step_min": STEP_MIN, "duration_min": DURATION_MIN,
         "fronts": fronts,
         "grid": {"bbox": list(BBOX), "nx": nx, "ny": ny, "cell_m": CELL_M, "arrival_min_rows": grid},
-        "assumptions": {"head_rate_m_per_min": round(head, 1), "length_to_breadth": LB, "urban_factor": URBAN_FACTOR,
+        "assumptions": {"head_rate_m_per_min": round(head, 1), "fire_speed": FIRE_SPEED, "length_to_breadth": LB, "urban_factor": URBAN_FACTOR,
                         "density_slowdown": DENSITY_SLOWDOWN, "brush_max_cover": BRUSH_MAX_COVER,
                         "not_modeled": "slope, fuel moisture, spotting, suppression before the stop"}})
     # For the map: burned cells with their arrival time (one source; the page filters by the current time),

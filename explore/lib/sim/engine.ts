@@ -35,6 +35,7 @@ export interface SimConfig {
   // of Rasul's static risk_score: lowest rank leaves leave_fast_low x faster, the middle at the base rates, the
   // highest leave_slow_high x slower (smooth in between). Buildings with no score keep the base rates.
   leave_by_risk: boolean;
+  leave_by_risk_able: boolean;       // also slow the people who can leave alone (false: only people who need help)
   leave_fast_low: number;
   leave_slow_high: number;
   match_rule: "rate" | "fleet" | "priority";  // AI: "rate" = people helped per minute of truck time (greedy);
@@ -67,6 +68,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   risk_structure: false,
   threat_boost: 9,
   leave_by_risk: true,
+  leave_by_risk_able: true,
   leave_fast_low: 1.5,
   leave_slow_high: 3,
   match_rule: "rate",
@@ -402,7 +404,7 @@ export class Simulation {
       }
       // people only start walking out while they can still get ahead of the fire; after that they stay (trapped)
       // leaving alone, slowed (or sped up) by the building's static risk rank
-      const a = t1 <= b.safeAble ? b.able * (1 - Math.exp(-selfRate * b.leaveF)) : 0;
+      const a = t1 <= b.safeAble ? b.able * (1 - Math.exp(-selfRate * (this.cfg.leave_by_risk_able ? b.leaveF : 1))) : 0;
       const canGo = t1 <= b.safeNeed;
       let h = canGo ? Math.max(0, b.need - b.stuck) * (1 - Math.exp(-aloneRate * b.leaveF)) : 0;
       const k = crews.get(b.idx) ?? 0;
