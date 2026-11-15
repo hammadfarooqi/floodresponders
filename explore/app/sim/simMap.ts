@@ -11,8 +11,9 @@ export const NEED_PER_DOT = 1;    // one purple dot = 1 person who needed help
 export const WALK_M_PER_MIN = { able: 80, need: 30 };  // walking speed along the streets (assumption)
 export const COLORS = { able: "#22c55e", need: "#c084fc", trapped: "#ef4444", truck: "#f97316", onscene: "#16a34a", proposal: "#38bdf8" };
 
-/** Risk view: building color = dynamic risk score now (people x structure x threat), 7 steps, each step 2x the last. */
-export const RISK_RAMP = ["#fff7bc", "#fee391", "#fec44f", "#fe9929", "#ec7014", "#cc4c02", "#8c2d04"];
+/** Risk view: building color = dynamic risk score now (people x structure x threat), 7 steps, each step 2x the last.
+ *  Strong colors on purpose: yellow = low, orange = middle, red = high. */
+export const RISK_RAMP = ["#ffff00", "#ffd400", "#ffa500", "#ff7000", "#ff3c00", "#ff0000", "#b00000"];   // yellow -> orange -> red
 export const riskStep = (r: number) => (r < 0.5 ? 0 : Math.max(1, Math.min(7, 1 + Math.floor(Math.log2(r)))));
 
 export interface Loaded {
@@ -146,7 +147,7 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
 
 /** Draws one Simulation on the map. Call reset() when a new Simulation starts, draw() every frame. */
 export class SimRenderer {
-  private markers = new Map<string, { m: maplibregl.Marker; el: HTMLDivElement; lng: number; lift: number }>();
+  private markers = new Map<string, { m: maplibregl.Marker; el: HTMLDivElement; lng: number }>();
   private walkers: Walker[] = [];
   private spawned = new Float64Array(0);
   private spawnedNeed = new Float64Array(0);
@@ -243,28 +244,22 @@ export class SimRenderer {
       e.dataset.status = tr.status;
       e.addEventListener("click", ev => { ev.stopPropagation(); this.onTruckClick?.(tr.id); });
       const mk = new maplibregl.Marker({ element: e, anchor: "bottom" }).setLngLat([tr.lng, tr.lat]).addTo(m);
-      this.markers.set(tr.id, { m: mk, el: e, lng: tr.lng, lift: 0 });
+      this.markers.set(tr.id, { m: mk, el: e, lng: tr.lng });
     }
   }
 
   /** Move the truck icons (every frame); a truck faces the way it drives (the icon is drawn facing right). */
   private moveMarkers(s: Simulation) {
-    // Icons are smaller when zoomed out (half size at the zoom that shows the whole area), so trucks at near buildings
-    // overlap less. A truck whose place is taken moves at most one icon (up or to a side), with a short stem to its
-    // real point; if there is no free place it stays on its real point and may overlap (working trucks on top).
-    // (Before: a spread of up to ~250 px kept every truck free but put icons far from where the trucks were.)
+    // Every truck icon stays exactly on its truck. Trucks at the same spot simply draw over each other, like layers
+    // (working trucks on top). Moving icons apart to avoid overlap made them look like they were in the wrong place.
+    // Icons are smaller when zoomed out (half size at the zoom that shows the whole area), so they overlap less.
     const sc = Math.round(Math.max(0.5, Math.min(1, (this.m.getZoom() - 11.6) / 2.4)) * 20) / 20;
     if (sc !== this.scale) {
       this.scale = sc;
       // labels shrink with the icon and hide below 70% (zoomed out they covered the trucks; the raised ladder still shows work)
       for (const { el } of this.markers.values()) { el.style.setProperty("--s", String(sc)); el.dataset.small = sc < 0.7 ? "1" : ""; }
     }
-    const w = 58 * sc, h = 36 * sc;
-    const near: [number, number][] = [[0, 0], [0, -(h + 2)], [w + 2, 0], [-(w + 2), 0]];
-    const placed: { x: number; y: number }[] = [];
-    // working trucks first: they keep their real place
-    const order = [...s.trucks].sort((a, b) => RANK[b.status] - RANK[a.status]);
-    for (const tr of order) {
+    for (const tr of s.trucks) {
       const mk = this.markers.get(tr.id);
       if (!mk) continue;
       const dx = tr.lng - mk.lng;
@@ -278,22 +273,6 @@ export class SimRenderer {
       const say = tr.status === "on_scene" && tb ? (tb.need >= 0.5 ? `bringing out ${Math.ceil(tb.need - 0.01)}` : "all out ✓") : "";
       const sayEl = mk.el.lastElementChild as HTMLElement;
       if (sayEl.textContent !== say) sayEl.textContent = say;
-      const p = this.m.project([tr.lng, tr.lat]);
-      let off: [number, number] = [0, 0];
-      for (const c of near) {
-        const x = p.x + c[0], y = p.y + c[1];
-        if (!placed.some(q => Math.abs(q.x - x) < w && Math.abs(q.y - y) < h)) { off = c; break; }
-      }
-      placed.push({ x: p.x + off[0], y: p.y + off[1] });
-      const key = Math.round(off[0]) * 1000 + Math.round(off[1]);
-      if (mk.lift !== key) {
-        mk.lift = key;
-        mk.m.setOffset(off);
-        const len = Math.hypot(off[0], off[1]);
-        mk.el.style.setProperty("--stem", `${len}px`);
-        mk.el.style.setProperty("--stem-a", `${Math.atan2(-off[1], -off[0])}rad`);
-        mk.el.dataset.lifted = len ? "1" : "";
-      }
     }
   }
 
@@ -420,8 +399,6 @@ export const TRUCK_CSS = `
 .truck .say:empty,.truck[data-small="1"] .say{display:none}
 .truck .say{font-size:calc(11px * var(--s, 1));padding:calc(3px * var(--s, 1)) calc(7px * var(--s, 1))}
 .truck[data-dir=left] .say{left:auto;right:100%;margin:0 2px 0 0}
-.truck[data-lifted="1"]::after{content:"";position:absolute;left:50%;top:100%;width:var(--stem);height:2px;margin-top:-1px;
-  transform-origin:0 50%;transform:rotate(var(--stem-a));background:#fff;opacity:.85;box-shadow:0 0 2px #000;pointer-events:none}
 .truck .ladder{transform-box:fill-box;transform-origin:0% 100%;transition:transform .8s cubic-bezier(.4,1.4,.6,1)}
 .truck[data-status=on_scene] .ladder{transform:translate(0,4px) rotate(-38deg) scaleX(1.55)}
 .truck[data-status=en_route] .body{animation:truck-bump .28s ease-in-out infinite alternate}
