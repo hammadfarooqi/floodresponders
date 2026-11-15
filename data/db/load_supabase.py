@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import areas as ar
 import build_rows as br
 import risk_score as rs
 
@@ -32,6 +33,10 @@ ASSESSOR_URL = "https://public.gis.lacounty.gov/public/rest/services/LACounty_Ca
 ASSESSOR_FIELDS = (["AIN", "UseType", "UseDescription", "SitusHouseNo", "SitusFraction", "SitusDirection",
                     "SitusStreet"]
                    + [f"{name}{n}" for n in range(1, 6) for name in ("Units", "YearBuilt", "Bedrooms", "SQFTmain")])
+FIRE_ZONE_URL = "https://services1.arcgis.com/jUJYIo9tSA7EHvfZ/arcgis/rest/services/FHSALRA25_v1_All/FeatureServer/0"
+TRACT_URL = ("https://onemap.cdc.gov/OneMapServices/rest/services/SVI/"
+             "CDC_ATSDR_Social_Vulnerability_Index_2022_USA/FeatureServer/2")
+TRACT_FIELDS = "FIPS,EP_AGE65,EP_DISABL,EP_NOVEH"
 ASSESSOR_TILES_PER_SIDE = 6
 ASSESSOR_PAGE_SIZE = 1000               # the most the service returns in one answer
 USER_AGENT = "rollcall-loader"
@@ -163,6 +168,41 @@ def read_assessor(cache_dir):
     return lots
 
 
+# ---------------------------------------------------------------- fire hazard zones and census tracts
+
+def arcgis_features(url, box, fields="*", geometry=True):
+    """Every feature of a public ArcGIS layer that touches the box (west, south, east, north)."""
+    features = []
+    while True:
+        query = urllib.parse.urlencode({
+            "where": "1=1", "geometry": ",".join(str(v) for v in box), "geometryType": "esriGeometryEnvelope",
+            "inSR": 4326, "outSR": 4326, "spatialRel": "esriSpatialRelIntersects", "outFields": fields,
+            "returnGeometry": "true" if geometry else "false", "geometryPrecision": 6,
+            "resultOffset": len(features), "f": "json"})
+        status, raw = request("GET", f"{url}/query?{query}", {"User-Agent": "generic-client"})
+        page = json.loads(raw) if status == 200 else {}
+        if "features" not in page:                      # the service reports errors inside a 200 answer
+            sys.exit(f"{url} answered {status}: {raw[:300]!r}")
+        features.extend(page["features"])
+        if not page["features"] or not page.get("exceededTransferLimit"):
+            return features
+
+
+def read_areas(boundary, cache_dir):
+    """(fire hazard zone features, census tract features), from the cache when it has them."""
+    os.makedirs(cache_dir, exist_ok=True)
+    layers = []
+    for name, url, fields in (("fire_zones", FIRE_ZONE_URL, "FHSZ_Description"), ("tracts", TRACT_URL, TRACT_FIELDS)):
+        path = os.path.join(cache_dir, f"{name}.json.gz")
+        if not os.path.exists(path):
+            print(f"Fetching {name} (first run only)...", flush=True)
+            with gzip.open(path, "wt") as f:
+                json.dump(arcgis_features(url, br.bounds(boundary), fields), f)
+        with gzip.open(path, "rt") as f:
+            layers.append(json.load(f))
+    return layers
+
+
 # ---------------------------------------------------------------- CoStar
 
 def read_jsonl(path):
@@ -233,6 +273,7 @@ def main():
     parser.add_argument("--costar-kit", default=os.path.join(ROOT, "data", "costar-kit"))
     parser.add_argument("--cache", default=os.path.join(ROOT, "data", "cache", "vexcel_hollywood"))
     parser.add_argument("--assessor-cache", default=os.path.join(ROOT, "data", "cache", "assessor_hollywood"))
+    parser.add_argument("--areas-cache", default=os.path.join(ROOT, "data", "cache", "areas_hollywood"))
     parser.add_argument("--boundary", default=os.path.join(here, "hollywood_boundary.geojson"),
                         help="GeoJSON file; its first feature is the area to load")
     args = parser.parse_args()
@@ -261,6 +302,7 @@ def main():
                  "again, or the upload would empty assessor_address and assessor_sqft.")
     properties, contacts = read_costar(args.costar_kit, boundary)
     buildings = br.build(parcels, properties, lots)
+    ar.add_areas(buildings, *read_areas(boundary, args.areas_cache))
     rs.score_rows(buildings, {p["costar_id"] for p in properties if p.get("is_senior_housing")})
 
     by_source = {}
@@ -274,6 +316,10 @@ def main():
           f"height suspect: {sum(1 for b in buildings if b['height_suspect'])}")
     print(f"  units source: {by_source}")
     print(f"  on a County Assessor lot: {sum(1 for b in buildings if b['assessor_ain'])}")
+    zones = {}
+    for b in buildings:
+        zones[b["fire_hazard_zone"]] = zones.get(b["fire_hazard_zone"], 0) + 1
+    print(f"  fire hazard zone: {zones}, in a census tract: {sum(1 for b in buildings if b['census_tract'])}")
     scored = [b["risk_score"] for b in buildings if b["risk_score"]]
     print(f"  risk score: {len(scored)} above 0 (highest {max(scored, default=0)}), "
           f"{sum(1 for b in buildings if b['risk_score'] == 0)} at 0, "

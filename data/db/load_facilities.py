@@ -47,17 +47,7 @@ def fetch(source, box):
         sql = (f'SELECT * FROM "{CDPH_TABLE}" WHERE "LATITUDE" > {south} AND "LATITUDE" < {north} '
                f'AND "LONGITUDE" > {west} AND "LONGITUDE" < {east}')
         return get_json(CDPH_URL, {"sql": sql})["result"]["records"]
-    records = []
-    while True:
-        page = get_json(ARCGIS[source] + "/query", {
-            "where": "1=1", "geometry": f"{west},{south},{east},{north}", "geometryType": "esriGeometryEnvelope",
-            "inSR": 4326, "spatialRel": "esriSpatialRelIntersects", "outFields": "*", "returnGeometry": "false",
-            "resultOffset": len(records), "f": "json"})
-        if "features" not in page:
-            sys.exit(f"{ARCGIS[source]} answered {str(page)[:300]}")
-        records.extend(f["attributes"] for f in page["features"])
-        if not page.get("exceededTransferLimit"):
-            return records
+    return [f["attributes"] for f in ls.arcgis_features(ARCGIS[source], box, geometry=False)]
 
 
 def read_lists(cache_dir, box):

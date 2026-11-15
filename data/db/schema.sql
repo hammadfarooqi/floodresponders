@@ -95,6 +95,13 @@ create table if not exists buildings (
   assessor_address      text,                 -- street address of the lot, no unit number
   assessor_sqft         int,                  -- floor area of the buildings on the lot, square feet
 
+  -- Areas the structure stands in (data/db/areas.py). Public data, joined by lat and lng.
+  fire_hazard_zone      text,                 -- CAL FIRE map of 2025: 'very_high' | 'high' | 'moderate' | 'none'
+  census_tract          text,                 -- 11-digit id of the 2020 census tract
+  tract_pct_age65       numeric,              -- percent of the people in the tract aged 65 or more
+  tract_pct_disability  numeric,              -- percent with a disability
+  tract_pct_no_vehicle  numeric,              -- percent of households with no vehicle
+
   -- Resolved values: what the app uses. *_source is 'costar', 'vexcel', 'assessor', 'estimated' or null.
   building_type         text,
   building_type_source  text,
@@ -133,6 +140,11 @@ alter table buildings add column if not exists assessor_bedrooms int;
 alter table buildings add column if not exists assessor_year_built int;
 alter table buildings add column if not exists assessor_address text;
 alter table buildings add column if not exists assessor_sqft int;
+alter table buildings add column if not exists fire_hazard_zone text;
+alter table buildings add column if not exists census_tract text;
+alter table buildings add column if not exists tract_pct_age65 numeric;
+alter table buildings add column if not exists tract_pct_disability numeric;
+alter table buildings add column if not exists tract_pct_no_vehicle numeric;
 alter table buildings add column if not exists roof_tree_cover_pct numeric;
 alter table buildings add column if not exists roof_structural_damage boolean;
 alter table buildings add column if not exists roof_missing_material boolean;
