@@ -247,12 +247,13 @@ as $$
   ), factors as (
     select o.id,
            sqrt(o.east_m ^ 2 + o.north_m ^ 2) as distance_m,
-           1 + p_boost * power(0.5, (
+           -- least(..., 1000): Postgres stops with "underflow" on 0.5 ^ 1100. 0.5 ^ 1000 is 0 for this purpose.
+           1 + p_boost * power(0.5, least((
              sqrt(o.east_m ^ 2 + o.north_m ^ 2)
              + case when p_wind_from_deg is null then 0
                     else p_wind_stretch * (o.east_m * sin(radians(p_wind_from_deg))
                                            + o.north_m * cos(radians(p_wind_from_deg))) end
-           ) / p_half_distance_m) as factor
+           ) / p_half_distance_m, 1000)) as factor
     from offsets o
   )
   select b.id, b.lat, b.lng, b.assessor_address, b.building_type, b.units, b.units_source, b.confidence,

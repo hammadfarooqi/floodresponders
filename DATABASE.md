@@ -414,7 +414,7 @@ score against a real fire yet.
 ## How the score changes for a fire origin
 
 Code: `data/db/fire_risk.py` (pure Python, tested) and the Postgres function `buildings_fire_risk` in
-`data/db/schema.sql`. Both hold the same rule. On 2026-11-14 they gave the same result for four origins on all
+`data/db/schema.sql`. Both hold the same rule. On 2026-11-14 they gave the same result for five origins on all
 40,246 rows. Nothing is stored: the function computes the values for each call.
 
 ```

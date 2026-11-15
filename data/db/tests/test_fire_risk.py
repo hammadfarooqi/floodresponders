@@ -65,6 +65,7 @@ def test_factor_is_highest_at_the_origin_and_halves_with_distance():
     assert fr.fire_factor(1000) == pytest.approx(1.5)               # one half distance
     assert fr.fire_factor(2000) == pytest.approx(1.25)
     assert fr.fire_factor(50_000) == pytest.approx(1.0, abs=1e-6)
+    assert fr.fire_factor(20_000_000) == 1.0                        # an origin on the other side of the earth
 
 
 def test_factor_never_rises_with_distance_and_never_goes_below_one():
@@ -132,3 +133,5 @@ def test_schema_sql_has_the_same_default_weights():
         found = re.search(rf"p_{name}\s+double precision\s+default\s+([0-9.]+)", sql)
         assert found, f"p_{name} has no default in schema.sql"
         assert float(found.group(1)) == value
+    # Postgres stops with "underflow" on 0.5 ^ 1100, so the SQL must limit the exponent.
+    assert re.search(r"power\(0\.5,\s*least\(", sql)
