@@ -28,18 +28,20 @@ method `riskScores()` lists all buildings by risk (meant as a tool for the deep 
 multiplied by a factor from the building's rank in Rasul's static `risk_score`: lowest rank 1.5x faster, middle 1x,
 highest 3x slower (`leave_fast_low`, `leave_slow_high`). Buildings with no score keep the base rates.
 
-**Fire speed.** `FIRE_SPEED=0.4` (in `data/pipeline/fire_timeline.py`, with `FIRE_TARGET="-118.335,34.1016"`):
-the spread rate is 0.4x the rate that would reach Hollywood Blvd at 3:00, so the front moves 0.9 km/h in brush and
-reaches 359 buildings (2,292 people) by 3:00, 316 acres. Chosen so the death toll is in the tens, like real LA
-fires. Regenerate: `FIRE_TARGET=... FIRE_SPEED=0.4 python3 data/pipeline/fire_timeline.py` then
+**Fire speed and leaving speed.** `FIRE_SPEED=0.7` (in `data/pipeline/fire_timeline.py`, with
+`FIRE_TARGET="-118.335,34.1016"`): the spread rate is 0.7x the rate that would reach Hollywood Blvd at 3:00, so the
+front moves 1.6 km/h in brush and reaches 1,124 buildings (9,053 people, 764 who need help) by 3:00, 670 acres.
+People leave faster than before: 30%/min of those who can leave alone, 3%/min of those who need help, high-risk
+buildings up to 2x slower. Chosen together so many people evacuate and the toll stays in the tens.
+Regenerate: `FIRE_TARGET=... FIRE_SPEED=0.7 python3 data/pipeline/fire_timeline.py` then
 `python3.12 data/pipeline/roads_stations.py`. The stuck-tenants call picks a building this fire reaches
 (`lib/sim/script.ts`; now 1865 N Fuller Apartments). The two scripted calls come early (0:06 stuck tenants,
 0:12 driver declines), because with this fire Roll Call reaches every building by about 0:25. Backup of the faster fire: `data/demo/backup_fire_speed_1.0/`.
 
-Result with default assumptions: today's 911 dispatch 35 trapped, Roll Call 4 (89% fewer; Roll Call's 4 could have
-left alone, which trucks do not help). Across assumption changes today traps 21-62 and Roll Call 0-4.
-911 calls come 1-15 min after the fire starts (`call_after_start_min`; null = the old 10-60 min before the fire). Faster fires:
-speed 0.5: 99 vs 12; 0.6: 172 vs 27; 1.0: 764 vs 277. The numbers below this line were measured with the old,
+Result with default assumptions: today's 911 dispatch 41 trapped, Roll Call 6 (86% fewer). 87 calls; median wait
+for a call-taker 21 min. Across assumption changes today traps 27-71 and Roll Call 4-7.
+911 calls come 1-15 min after the fire starts (`call_after_start_min`; null = the old 10-60 min before the fire). Other settings:
+speed 0.4 with the old leaving rates: 35 vs 4 (only 2,295 people); speed 1.0 with fast leaving: 86 vs 22. The numbers below this line were measured with the old,
 faster fire and `leave_by_risk=false`. Across assumption changes (seeds, truck 20/45 km/h, crew speed, call share 40%, 10 call-takers, leaving
 rate, slow-down 1.5–3x) today traps 419–909 and Roll Call 94–407. Ranking choices on the default run (Roll Call trapped): our 10%
 estimate × urgency 52, Rasul's people × urgency 60, Rasul's people × threat k=9 (default) 67, k=1 (max 2×) 100.

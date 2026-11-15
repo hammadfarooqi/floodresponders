@@ -1,7 +1,7 @@
 # Roll Call: what to say to the judges
 
 About 3 minutes of talk, then answers to likely questions. Short sentences. Numbers are from
-`node explore/scripts/run_sim.ts` with the default assumptions (FIRE_SPEED 0.4).
+`node explore/scripts/run_sim.ts` with the default assumptions (FIRE_SPEED 0.7).
 
 ---
 
@@ -29,12 +29,13 @@ Say: "To test the idea, we built a simulation of one fire. Every step uses real 
 
 1. **The fire.** The real Sunset Fire start point (Runyon Canyon, 8 Jan 2025), with a stronger wind toward
    Hollywood. The fire spreads over a 30 m grid: fast in brush, slower between buildings, faster downwind.
-   It moves about 1 km/h in the brush and slower between buildings; crews stop it after 3 hours. From this we know **the minute the fire reaches each building**.
+   It moves about 1.6 km/h in the brush and slower between buildings; crews stop it after 3 hours. From this we know **the minute the fire reaches each building**.
 2. **The people.** 1,527 buildings with people are in the fire's path: about **21,600 people**, and about
    **1,900 who need help** (people per building = units × 2.4 × 95% occupied; need help = 10%).
    Everyone gets the evacuation order at minute 0.
-   - People who can leave alone leave quickly (15% of those still inside, every minute).
-   - People who need help almost never get out alone (1% per minute). With a fire crew there, 1.5 people per minute.
+   - People who can leave alone leave quickly (30% of those still inside, every minute).
+   - People who need help rarely get out alone (3% per minute). With a fire crew there, 1.5 people per minute.
+   - In buildings with a high risk score (from building records), people leave more slowly: up to 2 times slower.
    - Everyone walks out on real streets, away from the fire. For each building we compute the last minute a person
      can start walking and still stay ahead of the fire. After that minute, people stay inside, and anyone still
      inside when the fire arrives counts as trapped. So nobody on the map walks through the fire.
@@ -76,10 +77,10 @@ Two calls in the demo show this:
 
 | Same fire, people, calls and trucks | Today (911 calls) | Roll Call |
 |---|---|---|
-| People trapped | 35 | 4 |
-| ... of them people who needed help | 31 | 0 |
+| People trapped | 41 | 6 |
+| ... of them people who needed help | 41 | 6 |
 
-"In this simulation, Roll Call leaves about **89% fewer people trapped**." While the run plays, point at the red
+"In this simulation, Roll Call leaves about **86% fewer people trapped**." While the run plays, point at the red
 phones: those are people waiting in the 911 queue. In the Roll Call run, trucks are often already on the way
 before anyone calls.
 
@@ -89,7 +90,7 @@ before anyone calls.
 - **Every assumption is on screen** (click "show assumptions"). Nothing is hidden in the code.
 - **We tried changing each assumption.** Fewer or more people calling 911 (40% to 100%), 2 to 10 call-takers,
   slower or faster crews, trucks at 20 or 45 km/h, people leaving more slowly, other random seeds. Today's dispatch
-  traps 21 to 62 people; Roll Call traps 0 to 4. **Roll Call is better in every case.** The exact numbers
+  traps 27 to 71 people; Roll Call traps 4 to 7. **Roll Call is better in every case.** The exact numbers
   change a lot; the direction does not.
 - **We say what it is not.** This is a simulation with assumptions. It is not a count of real lives saved, and
   the phone calls in the demo are scripted. The fire model ignores slope, wind gusts and embers.

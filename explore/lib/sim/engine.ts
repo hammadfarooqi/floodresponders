@@ -56,8 +56,8 @@ export interface Call { id: number; building: string; t_call: number; t_answer: 
                         truck: string | null; from: "911" | "supervisor" }
 
 export const DEFAULT_CONFIG: SimConfig = {
-  self_evac_rate_per_min: 0.15,
-  need_alone_rate_per_min: 0.01,
+  self_evac_rate_per_min: 0.3,
+  need_alone_rate_per_min: 0.03,
   walk_m_per_min: { able: 80, need: 30 },
   assisted_people_per_min: 1.5,
   truck_speed_kmh: 30,
@@ -72,7 +72,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   leave_by_risk: true,
   leave_by_risk_able: true,
   leave_fast_low: 1.5,
-  leave_slow_high: 3,
+  leave_slow_high: 2,
   match_rule: "rate",
   duration_min: 180,
   call_share: 0.7,
