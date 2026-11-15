@@ -35,14 +35,19 @@ Say: "To test the idea, we built a simulation of one fire. Every step uses real 
    Everyone gets the evacuation order at minute 0.
    - People who can leave alone leave quickly (15% of those still inside, every minute).
    - People who need help almost never get out alone (1% per minute). With a fire crew there, 1.5 people per minute.
-   - Anyone still inside when the fire arrives counts as trapped.
+   - Everyone walks out on real streets, away from the fire. For each building we compute the last minute a person
+     can start walking and still stay ahead of the fire. After that minute, people stay inside, and anyone still
+     inside when the fire arrives counts as trapped. So nobody on the map walks through the fire.
 3. **The trucks.** 8 fire engines start at the real LAFD stations south of the hills. They drive on the real
    street network (OpenStreetMap) at 30 km/h, and streets close when the fire reaches them.
-4. **Two runs, same everything.** Same fire, same people, same trucks. Only the dispatch rule changes.
-   - **Old way:** each free truck goes to the nearest building that needs help, and never re-plans.
-   - **Roll Call:** described in section 4.
+4. **Two runs, same everything.** Same fire, same people, same trucks, same 911 calls. Only the dispatch changes.
+   - **Today (911 calls):** in 70% of buildings with people who need help, someone calls 911, 10–60 minutes before
+     the fire arrives. 4 call-takers answer in the order calls arrive (2.5 min each). The oldest answered call gets
+     the closest free truck (this is what dispatch software does with truck GPS). Trucks do not re-plan. A building
+     that never gets through gets no truck. On the map, a red 📞 shakes above a building that called and still waits.
+   - **Roll Call:** described in section 4. It gets the same 911 calls, but it does not wait for them.
 
-**What the map shows.** Yellow buildings have people inside. Blue buildings are empty. Red buildings burned with
+**What the map shows.** A dashed line = a truck driving to that building. Yellow buildings have people inside. Blue buildings are empty. Red buildings burned with
 people inside. Green dots are people walking out along the streets, purple dots are people who needed help.
 
 ## 4. How the AI chooses where each truck goes (45 s)
@@ -67,20 +72,23 @@ Two calls in the demo show this:
 
 ## 5. The result (15 s)
 
-| Same fire, people and trucks | Old way | Roll Call |
+| Same fire, people, calls and trucks | Today (911 calls) | Roll Call |
 |---|---|---|
-| People trapped | 193 | 32 |
-| ... of them people who needed help | 188 | 27 |
+| People trapped | 310 | 52 |
+| ... of them people who needed help | 299 | 41 |
 
-"In this simulation, Roll Call leaves about **84% fewer people trapped**."
+"In this simulation, Roll Call leaves about **83% fewer people trapped**." While the run plays, point at the red
+phones: those are people waiting in the 911 queue. In the Roll Call run, trucks are often already on the way
+before anyone calls.
 
 ## 6. Why you can trust the comparison (30 s)
 
 - **Fair test.** Both runs use the same fire, the same people and the same trucks. Only the rule differs.
 - **Every assumption is on screen** (click "show assumptions"). Nothing is hidden in the code.
-- **We tried changing each assumption.** Slower or faster crews, trucks at 20 or 45 km/h, people leaving faster
-  or slower, a different urgency scale, re-planning every 10 minutes. **Roll Call is better in every case.**
-  The exact numbers change a lot; the direction does not.
+- **We tried changing each assumption.** Fewer or more people calling 911 (40% to 100%), 2 to 10 call-takers,
+  slower or faster crews, trucks at 20 or 45 km/h, people leaving more slowly, other random seeds. Today's dispatch
+  traps 280 to 470 people; Roll Call traps 44 to 136. **Roll Call is better in every case.** The exact numbers
+  change a lot; the direction does not.
 - **We say what it is not.** This is a simulation with assumptions. It is not a count of real lives saved, and
   the phone calls in the demo are scripted. The fire model ignores slope, wind gusts and embers.
 
@@ -100,10 +108,13 @@ Two calls in the demo show this:
 - **"Where does 'needs help' come from?"** Today: 10% of residents (a placeholder until we add census data on
   age and disability per area). CoStar marks senior housing and walk-ups. A phone call replaces the estimate
   with the real number.
-- **"Why is the old way so bad?"** It ignores how soon the fire arrives. It sends trucks to buildings the fire
-  will reach in 2 hours while a building 15 minutes from the fire waits. It also never re-plans.
-- **"Is the old way a fair copy of real dispatch?"** It is a simple version of "closest unit to the call".
-  Real dispatchers are smarter than this rule, but they handle one call at a time and do not re-plan every unit.
+- **"Why is today's dispatch so bad here?"** Three reasons: people must get through on 911 first (some never do,
+  and calls wait in a queue); the oldest call is served first, not the one the fire reaches first; and a truck
+  never changes its job when something more urgent appears.
+- **"Is this a fair copy of real dispatch?"** It follows what dispatch centers publish: calls are answered in the
+  order received, and dispatch software recommends the closest available unit by GPS. Real dispatchers can
+  re-prioritize by hand; in January 2025 the call volume was too high for that. Sources: explore/research/DISPATCH_TODAY.md.
+- **"Even if everyone calls?"** Then today's dispatch still traps about 336 people: the queue gets longer.
 - **"Why trust the AI to move trucks by itself?"** It shows its reason for every move, the dispatcher can undo
   any move, and the dispatcher can lock a truck ("hold").
 - **"How long does the matching take?"** About 50 ms for all 8 trucks over 74,000 street corners, in the browser.

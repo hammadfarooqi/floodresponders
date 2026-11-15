@@ -1,4 +1,4 @@
-Last updated: 2026-11-14
+Last updated: 2026-11-15
 
 # How fire dispatch works today, and where it breaks in a wildfire evacuation
 
@@ -46,6 +46,17 @@ Design rules that follow:
 - Keep the familiar parts: unit status board, pending queue, map, a running log. Add the AI parts next to them.
 - Show the reason for every AI decision in one line ("10 need help, fire in 38 min, ETA 4 min").
 
+## How we model "today" in the simulation (added 2026-11-15)
+
+- **Calls first.** A fire truck goes to a building only after someone there gets through on 911. In Los Angeles,
+  police and sheriff's deputies do door-to-door evacuation; fire units answer calls for rescue.
+- **Answered in order.** 911 calls are answered in the order received (San Diego describes a time queue; hanging up
+  and calling again puts you at the back). During wildfires, call volume can rise 4–5 times (Utah, 2021 season).
+- **Closest unit.** Dispatch software uses GPS (AVL) on every truck and recommends the closest available unit for
+  each call (Phoenix, Mooresville NC). The dispatcher accepts it. Units do not re-plan when a more urgent call arrives.
+- **Our assumptions:** 70% of buildings with people who need help call, 10–60 min before the fire; 4 call-takers,
+  2.5 min per call; oldest answered call → closest free truck by road. All shown in the /sim assumptions panel.
+
 ## Sources (accessed 2026-11-14)
 
 - LAFD, Palisades Fire After-Action Review Report (final, 2025-10-08): https://lafd.org/sites/default/files/pdf_files/Palisades_AARR_10_08_2025_final.pdf
@@ -65,4 +76,11 @@ Design rules that follow:
 - Phoenix Regional Dispatch Center (second operator reviews recommended units): https://www.phoenix.gov/administration/departments/fire/about-us/units-divisions/regional-dispatch-center.html
 - Radio Mobile, how AVL improves fire/EMS response times: https://radiomobile.com/how-avl-improves-fire-ems-department-response-times/
 - Zetron, configuring call-taking and dispatch screens: https://www.zetron.com/blog/configuring-your-call-taking-and-dispatch-screens-for-instant-awareness/
+- San Diego Fire-Rescue, Emergency Command & Data Center (calls answered in order received): https://sandiego.gov/fire/about/organization/commcenter
+- KSL, dispatch centers overwhelmed with calls during fire season (400–500% increase): https://www.ksl.com/article/51358480/dispatch-centers-overwhelmed-with-calls-during-fire-season
+- Phoenix Regional Dispatch (AVL, closest appropriate apparatus): https://www.phoenix.gov/administration/departments/fire/about-us/units-divisions/regional-dispatch-center.html
+- Mooresville NC, CAD selects the closest fire truck by GPS: https://iredellfreenews.com/?p=32790
+- LASD manual 86-014, decision to evacuate during major fire emergencies: https://pars.lasd.org/Viewer/Manuals/13233/Content/14649
+- Police Magazine, the California wildfires (door-to-door evacuation by law enforcement): https://www.policemag.com/articles/the-california-wildfires
+- LAist, two homebound men died after repeated 911 calls (Eaton Fire): https://laist.com/news/climate-environment/despite-three-911-calls-two-homebound-disabled-men-died-in-the-eaton-fire-waiting-for-rescue
 - Motorola Solutions, CAD product overview: https://www.motorolasolutions.com/en_us/products/command-center-software/voice-and-computer-aided-dispatch.html

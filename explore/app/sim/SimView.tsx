@@ -1,5 +1,5 @@
 "use client";
-// /sim: the old way (nearest building, never re-plan) vs Roll Call AI dispatch, on the same fire, people and trucks.
+// /sim: today's 911-call dispatch vs Roll Call AI dispatch, on the same fire, people, calls and trucks.
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,7 +11,8 @@ import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, typ
 const DURATION = 180, RUN_SECONDS = 25;
 const VIEW = { center: [-118.338, 34.094] as [number, number], zoom: 13.75, pitch: 45, bearing: 0 };
 const RUNS: Record<Policy, { n: number; title: string; sub: string }> = {
-  nearest: { n: 1, title: "Old way", sub: "Each free truck goes to the nearest building that needs help. It never re-plans." },
+  calls: { n: 1, title: "Today: 911 calls", sub: "A truck goes only where someone got through on 911. Calls are answered in order; the oldest call gets the closest free truck. No re-planning." },
+  nearest: { n: 1, title: "Nearest first", sub: "Each free truck goes to the nearest building that needs help. It never re-plans." },
   ours: { n: 2, title: "Roll Call AI", sub: "Sends each truck where it helps the most people per minute: people needing help × how soon the fire arrives ÷ (drive time + time on scene). Only if the truck can arrive before the fire. Re-plans every 5 min and after every call." },
 };
 
@@ -29,7 +30,7 @@ export default function SimView() {
   const clock = useRef(0);   // playback clock (sim minutes); the sim advances in fixed ticks up to it
 
   const [ready, setReady] = useState(false);
-  const [policy, setPolicy] = useState<Policy>("nearest");
+  const [policy, setPolicy] = useState<Policy>("calls");
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [pauseOnCalls, setPauseOnCalls] = useState(true);
@@ -80,6 +81,11 @@ export default function SimView() {
     moments.current = p === "ours" ? [
       { t: DECLINE.call_min, fn: driverDeclines, done: false },
       { t: STUCK.call_min, fn: s2 => { callAt.current = s2.t; return tenantStuck(s2); }, done: false },
+    ] : p === "calls" ? [
+      // the same supervisor calls 911 today: the call waits in the same queue as everyone else
+      { t: STUCK.call_min, fn: s2 => { s2.addCall(STUCK.building_id); const b = s2.byId.get(STUCK.building_id)!;
+        return [{ t: s2.t, speaker: "Supervisor" as const, to: "911", text: `This is the building manager at ${b.label}. A tenant in a wheelchair is stuck on the 4th floor with two neighbors.` },
+                { t: s2.t, speaker: "System" as const, text: `The call joins the 911 queue: ${s2.ringing().length} buildings are waiting for help.` }]; }, done: false },
     ] : [];
     callAt.current = null; logSeen.current = 0; clock.current = 0;
     renderer.current?.reset(s);
@@ -88,7 +94,7 @@ export default function SimView() {
     setFrame(f => f + 1);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { if (ready) start("nearest"); }, [ready, start]);
+  useEffect(() => { if (ready) start("calls"); }, [ready, start]);
 
   // force = redraw everything now (after a user action); the play loop passes false (moving layers ~20/s)
   const draw = (force = true) => { if (sim.current) renderer.current?.draw(sim.current, [], force); };
@@ -162,7 +168,7 @@ export default function SimView() {
       <div className="card left">
         <div className="eyebrow">Roll Call · dispatch simulation · Sunset Fire what-if</div>
         <div className="runs">
-          {(["nearest", "ours"] as Policy[]).map(p => (
+          {(["calls", "ours"] as Policy[]).map(p => (
             <button key={p} className={`run ${policy === p ? "on" : ""}`} onClick={() => start(p)} disabled={!ready}>
               <span className="num">{RUNS[p].n}</span>{RUNS[p].title}
               {results[p] && <span className="done">✓</span>}
@@ -188,6 +194,7 @@ export default function SimView() {
             <div><b>{n0(c.inside)}</b><span>still inside<br /><i style={{ color: COLORS.need }}>{n0(c.need)} need help</i></span></div>
             <div><b style={{ color: COLORS.trapped }}>{n0(c.trapped)}</b><span>trapped<br /><i>{n0(c.trappedNeed)} needed help</i></span></div>
           </div>)}
+        {s && <div className="small">📞 {s.ringing().length} buildings called and wait for help · {s.calls.filter(x => x.t_call <= t).length} calls so far</div>}
         <div className="small">People in the {s ? s.buildings.length.toLocaleString() : "…"} buildings the fire reaches ({c ? n0(c.total) : "…"} people, estimated).
           Simulation with labeled assumptions, not a prediction. <a onClick={() => setShowAssumptions(v => !v)}>{showAssumptions ? "hide" : "show"} assumptions</a></div>
         {showAssumptions && (
@@ -202,16 +209,18 @@ export default function SimView() {
             <tr><td>AI re-match</td><td>every {cfg.rematch_every_min} min and after every call</td></tr>
             <tr><td>People per building</td><td>units × 2.4 × 0.95; need help = 10% (estimate, BUILDING_MODEL.md)</td></tr>
             <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (about 130°); the front stops at Hollywood Blvd at 3:00 (crews hold the line)</td></tr>
-            <tr><td>Calls</td><td>scripted demo words; effects are simulated. {STUCK.count} stuck tenants exist in both runs; only the AI run gets the call</td></tr>
+            <tr><td>911 calls</td><td>{Math.round(cfg.call_share * 100)}% of buildings with people who need help call, {cfg.call_lead_min[0]}–{cfg.call_lead_min[1]} min before the fire reaches them; {cfg.call_takers} call-takers, {cfg.call_handle_min} min per call, answered in order (same calls in both runs)</td></tr>
+            <tr><td>Today</td><td>oldest answered call → closest free truck by road (CAD + GPS); trucks do not re-plan; buildings that never call get no truck</td></tr>
+            <tr><td>Agent calls</td><td>scripted demo words; effects are simulated. {STUCK.count} stuck tenants exist in both runs; in run 1 the supervisor calls 911</td></tr>
             <tr><td>Trucks</td><td>8 engines from LAFD stations south of the hills; same start in both runs</td></tr>
           </tbody></table>)}
       </div>
 
       {/* right: agent calls + dispatch feed */}
       <div className="card right">
-        {policy === "ours" && (
+        {(policy === "ours" || lines.length > 0) && (
           <>
-            <div className="h">Agent calls <span className="tag">scripted demo transcript</span></div>
+            <div className="h">{policy === "ours" ? "Agent calls" : "Calls"} <span className="tag">scripted demo transcript</span></div>
             {lines.length === 0 && <div className="empty">Calls appear here: a driver declines at {fmtT(DECLINE.call_min)}, a building supervisor reports stuck tenants at {fmtT(STUCK.call_min)}.</div>}
             <div className="transcript">
               {lines.map((l, i) => (
@@ -238,25 +247,26 @@ export default function SimView() {
         <div className="lh">People walking to safety on the streets</div>
         <div><i className="dot" style={{ background: COLORS.able }} />left on their own, fast (1 dot = {ABLE_PER_DOT})</div>
         <div><i className="dot" style={{ background: COLORS.need }} />needed help, slow (1 dot = {NEED_PER_DOT})</div>
-        <div><i className="truckkey">27</i>engine · dashed line = assigned building · yellow = route</div>
+        <div><i className="truckkey">27</i>engine · dashed line = driving to that building</div>
+        <div><span style={{ marginRight: 6 }}>📞</span>called 911, waiting for a truck</div>
       </div>
 
       {/* comparison */}
-      {(results.nearest || results.ours) && s?.done && (
+      {(results.calls || results.ours) && s?.done && (
         <div className="card result">
           <div className="h">Same fire, same people, same 8 trucks</div>
-          <table><thead><tr><th /><th>1 · Old way</th><th>2 · Roll Call AI</th></tr></thead><tbody>
-            <tr><td>Trapped</td><td>{results.nearest ? n0(results.nearest.trapped) : "–"}</td><td>{results.ours ? n0(results.ours.trapped) : "–"}</td></tr>
-            <tr><td>…who needed help</td><td>{results.nearest ? n0(results.nearest.trappedNeed) : "–"}</td><td>{results.ours ? n0(results.ours.trappedNeed) : "–"}</td></tr>
-            <tr><td>Evacuated</td><td>{results.nearest ? n0(results.nearest.evacuated) : "–"}</td><td>{results.ours ? n0(results.ours.evacuated) : "–"}</td></tr>
+          <table><thead><tr><th /><th>1 · Today</th><th>2 · Roll Call AI</th></tr></thead><tbody>
+            <tr><td>Trapped</td><td>{results.calls ? n0(results.calls.trapped) : "–"}</td><td>{results.ours ? n0(results.ours.trapped) : "–"}</td></tr>
+            <tr><td>…who needed help</td><td>{results.calls ? n0(results.calls.trappedNeed) : "–"}</td><td>{results.ours ? n0(results.ours.trappedNeed) : "–"}</td></tr>
+            <tr><td>Evacuated</td><td>{results.calls ? n0(results.calls.evacuated) : "–"}</td><td>{results.ours ? n0(results.ours.evacuated) : "–"}</td></tr>
           </tbody></table>
-          {results.nearest && results.ours ? (
-            <div className="small">In this simulation the AI strategy leaves {n0(results.nearest.trapped - results.ours.trapped)} fewer people trapped
-              ({Math.round((1 - results.ours.trapped / results.nearest.trapped) * 100)}% fewer). Simulated, with the assumptions on the left; not a count of real lives.</div>
-          ) : policy === "nearest" ? (
+          {results.calls && results.ours ? (
+            <div className="small">In this simulation Roll Call leaves {n0(results.calls.trapped - results.ours.trapped)} fewer people trapped
+              ({Math.round((1 - results.ours.trapped / results.calls.trapped) * 100)}% fewer). Simulated, with the assumptions on the left; not a count of real lives.</div>
+          ) : policy === "calls" ? (
             <button className="run on next" onClick={() => start("ours")}>Run 2: Roll Call AI →</button>
           ) : (
-            <button className="run next" onClick={() => start("nearest")}>Run 1: Old way →</button>
+            <button className="run next" onClick={() => start("calls")}>Run 1: Today (911 calls) →</button>
           )}
         </div>)}
     </div>

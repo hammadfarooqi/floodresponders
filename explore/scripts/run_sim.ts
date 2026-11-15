@@ -12,10 +12,11 @@ const stations = JSON.parse(readFileSync(D + "stations.json", "utf8")).stations;
 const cfg: Partial<SimConfig> = {};
 for (const a of process.argv.slice(2)) { const [k, v] = a.split("="); (cfg as any)[k] = isNaN(Number(v)) ? v : Number(v); }
 const g = new RoadGraph(roads);
-for (const policy of ["nearest", "ours"] as const) {
+for (const policy of ["calls", "nearest", "ours"] as const) {
   const t0 = performance.now();
   const s = new Simulation({ g, buildings, stations }, policy, cfg);
   seedHidden(s);
+  if (policy === "calls") { s.advanceTo(STUCK.call_min); s.addCall(STUCK.building_id); }
   if (policy === "ours") {
     s.advanceTo(DECLINE.call_min); const a = driverDeclines(s);
     s.advanceTo(STUCK.call_min); const b = tenantStuck(s);
@@ -28,6 +29,8 @@ for (const policy of ["nearest", "ours"] as const) {
   const c = s.counts;
   const kinds: Record<string, number> = {};
   for (const l of s.log) kinds[l.kind] = (kinds[l.kind] ?? 0) + 1;
+  const answered = s.calls.filter(c => c.t_answer <= 180), sent = s.calls.filter(c => c.t_dispatch !== null);
+  if (policy !== "ours") console.log(`  calls ${s.calls.length}, answered ${answered.length}, got a truck ${sent.length}, median wait to answer ${(answered.map(c => c.t_answer - c.t_call).sort((a, b) => a - b)[answered.length >> 1] ?? 0).toFixed(1)} min`);
   console.log(policy.padEnd(8), `total ${c.total.toFixed(0)} evac ${c.evacuated.toFixed(0)} trapped ${c.trapped.toFixed(1)} (needed help ${c.trappedNeed.toFixed(1)}, alone ${(c.trapped - c.trappedNeed).toFixed(1)})`,
     `served ${s.trucks.map(t => t.served.toFixed(0)).join(",")}`, JSON.stringify(kinds), `${((performance.now() - t0) / 1000).toFixed(1)}s`);
 }

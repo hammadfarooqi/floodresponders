@@ -19,6 +19,19 @@ interface Walker { route: Route; t0: number; kind: "able" | "need"; side: number
 interface Route { xs: Float64Array; ys: Float64Array; cum: Float64Array }   // street path to safety, cumulative meters
 export interface PendingLine { truck: string; building: string }
 
+/** A red bubble with a white phone, drawn once on a canvas (no sprite server needed). */
+function phoneIcon(): ImageData {
+  const S = 48, c = document.createElement("canvas"); c.width = c.height = S;
+  const x = c.getContext("2d")!;
+  x.fillStyle = "#dc2626"; x.strokeStyle = "#ffffff"; x.lineWidth = 3;
+  x.beginPath(); x.arc(S / 2, S / 2 - 3, 18, 0, Math.PI * 2); x.fill(); x.stroke();
+  x.beginPath(); x.moveTo(S / 2 - 6, S / 2 + 13); x.lineTo(S / 2, S - 2); x.lineTo(S / 2 + 6, S / 2 + 13); x.closePath();
+  x.fillStyle = "#dc2626"; x.fill();
+  x.font = "22px -apple-system, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+  x.fillText("📞", S / 2, S / 2 - 2);
+  return x.getImageData(0, 0, S, S);
+}
+
 /** 3D terrain makes every map update redraw the ground texture: 76 fps without it vs 20 fps with it while the
  *  simulation plays (measured). The simulation pages start flat (hills still shaded) and offer a "3D hills" toggle. */
 export function setHills(m: maplibregl.Map, on: boolean) {
@@ -43,6 +56,8 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
   };
   const empty = { type: "FeatureCollection" as const, features: [] };
   m.addSource("sel", { type: "geojson", data: empty });
+  m.addSource("calls", { type: "geojson", data: empty });
+  if (!m.hasImage("phone")) m.addImage("phone", phoneIcon(), { pixelRatio: 2 });
   m.addSource("walkers", { type: "geojson", data: empty });
   m.addSource("routes", { type: "geojson", data: empty });
   m.addSource("links", { type: "geojson", data: empty });
@@ -60,6 +75,10 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
     paint: { "circle-radius": ["match", ["get", "k"], "need", 3.6, 3],
              "circle-color": ["match", ["get", "k"], "need", COLORS.need, COLORS.able], "circle-opacity": ["get", "o"],
              "circle-stroke-color": "#0b0b0b", "circle-stroke-width": 0.6, "circle-stroke-opacity": ["get", "o"] } });
+  m.addLayer({ id: "calls", type: "symbol", source: "calls",
+    layout: { "icon-image": "phone", "icon-size": 1.3, "icon-anchor": "bottom", "icon-offset": [0, -6],
+              "icon-allow-overlap": true, "icon-ignore-placement": true },
+    paint: { "icon-translate": [0, 0] } });
   m.addLayer({ id: "sel", type: "circle", source: "sel",
     paint: { "circle-radius": 16, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#ffffff", "circle-stroke-width": 3,
              "circle-pitch-alignment": "map" } });
@@ -76,19 +95,13 @@ export class SimRenderer {
   private escape: Int32Array;                // next road node toward safety, per node (-1 = already safe)
   private routes = new Map<number, Route>(); // per sim building idx
   private fire = { burn: 0, cool: 0, bld: 0 };
-  private lastPush = -1e9;   // wall time of the last setData on the moving layers
+  private lastPush = -1e9;
+  private ringKey = "";   // wall time of the last setData on the moving layers
   onTruckClick?: (id: string) => void;
 
   constructor(private m: maplibregl.Map, private d: Loaded) {
-    // Safe streets = more than 500 m by road from any street the fire reaches. Every road node gets its next
-    // step toward the nearest safe street, so people walk away from the fire along real streets.
-    const g = d.g, fd = new Float64Array(g.n), fp = new Int32Array(g.n);
-    g.dijkstra(g.fireNodes(), -1, fd, fp);
-    const safe: number[] = [];
-    for (let i = 0; i < g.n; i++) if (Number.isFinite(fd[i]) && fd[i] > 500) safe.push(i);
-    const ed = new Float64Array(g.n);
-    this.escape = new Int32Array(g.n);
-    g.dijkstra(safe, -1, ed, this.escape);
+    // the same street routes to safety the engine uses to decide who can still get out (RoadGraph.escape)
+    this.escape = d.g.escape();
   }
 
   private route(s: Simulation, idx: number): Route {
@@ -194,17 +207,10 @@ export class SimRenderer {
         mk.el.dataset.held = s.locks.has(tr.id) ? "1" : "";
         mk.el.title = `${tr.name}: ${tr.status.replace("_", " ")}${tr.building ? " → " + s.byId.get(tr.building)?.label : ""}`;
       }
-      if (!tr.building) continue;
+      // only a dashed line from a truck that is driving to its building (no route line, no rings)
+      if (!tr.building || tr.status !== "en_route") continue;
       const b = s.byId.get(tr.building)!;
       links.push({ type: "Feature", properties: { end: 0 }, geometry: { type: "LineString", coordinates: [[tr.lng, tr.lat], [b.lng, b.lat]] } });
-      links.push({ type: "Feature", properties: { end: 1 }, geometry: { type: "Point", coordinates: [b.lng, b.lat] } });
-      if (tr.status === "en_route" && tr.path.length > 1) {
-        let i = 1; while (i < tr.cum.length - 1 && tr.cum[i] < tr.pos_m) i++;
-        const coords: [number, number][] = [[tr.lng, tr.lat]];
-        for (let k = i; k < tr.path.length; k++) { const n = tr.path[k]; if (n >= 0) coords.push([d.g.lng[n], d.g.lat[n]]); }
-        coords.push([b.lng, b.lat]);
-        routes.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: coords } });
-      }
     }
     for (const pl of pending) {
       const tr = s.trucks.find(x => x.id === pl.truck), b = s.byId.get(pl.building);
@@ -213,6 +219,18 @@ export class SimRenderer {
       links.push({ type: "Feature", properties: { end: 1, c: COLORS.proposal }, geometry: { type: "Point", coordinates: [b.lng, b.lat] } });
     }
     (m.getSource("routes") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: routes });
+    // buildings that called 911 and still wait for a truck: a phone that shakes
+    const ring = s.ringing();
+    const key = ring.map(c => c.id).join(",");
+    if (key !== this.ringKey) {
+      this.ringKey = key;
+      (m.getSource("calls") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: ring.map(c => {
+        const b = s.byId.get(c.building)!;
+        return { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [b.lng, b.lat] } };
+      }) });
+    }
+    const ph = Math.floor(now / 70) % 4;
+    if (m.getLayer("calls")) m.setPaintProperty("calls", "icon-translate", [[-2, 0], [2, 0], [-1, 0], [1, 0]][ph] as [number, number]);
     (m.getSource("links") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: links });
     (m.getSource("proposals") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: props });
   }

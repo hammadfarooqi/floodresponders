@@ -88,6 +88,68 @@ export class RoadGraph {
     return -1;
   }
 
+  /** Minute the fire first reaches each node (earliest fire_min of its streets), Infinity if never. */
+  nodeFireTimes(): Float64Array {
+    const out = new Float64Array(this.n).fill(Infinity);
+    for (let u = 0; u < this.n; u++)
+      for (let k = this.start[u], e = this.start[u + 1]; k < e; k++) if (this.fire[k] < out[u]) out[u] = this.fire[k];
+    return out;
+  }
+
+  /** Walking routes away from the fire: multi-source search from `safe` nodes that only steps to a node the fire
+   *  reaches no later than the current one. Following `next` from any node then always walks toward streets the fire
+   *  reaches later (never back into burned areas). Nodes with no such path get the plain shortest route. */
+  escapeRoutes(safe: number[], fireT: Float64Array): Int32Array {
+    const next = new Int32Array(this.n).fill(-1), dist = new Float64Array(this.n).fill(Infinity);
+    const heapN: number[] = [], heapD: number[] = [];
+    const push = (node: number, d: number) => {
+      let i = heapN.length; heapN.push(node); heapD.push(d);
+      while (i > 0) { const p = (i - 1) >> 1; if (heapD[p] <= d) break; heapN[i] = heapN[p]; heapD[i] = heapD[p]; i = p; }
+      heapN[i] = node; heapD[i] = d;
+    };
+    const pop = (): number => {
+      const top = heapN[0], lastN = heapN.pop()!, lastD = heapD.pop()!, size = heapN.length;
+      if (size > 0) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= size) break; if (c + 1 < size && heapD[c + 1] < heapD[c]) c++;
+        if (heapD[c] >= lastD) break; heapN[i] = heapN[c]; heapD[i] = heapD[c]; i = c; } heapN[i] = lastN; heapD[i] = lastD; }
+      return top;
+    };
+    const run = (monotone: boolean) => {
+      for (const s0 of safe) if (dist[s0] > 0) { dist[s0] = 0; push(s0, 0); }
+      while (heapN.length) {
+        const d = heapD[0], u = pop();
+        if (d > dist[u]) continue;
+        for (let k = this.start[u], e = this.start[u + 1]; k < e; k++) {
+          const v = this.to[k];
+          if (monotone && fireT[v] > fireT[u]) continue;   // walking v -> u must not go toward earlier fire
+          const nd = d + this.len[k];
+          if (nd < dist[v]) { dist[v] = nd; next[v] = u; push(v, nd); }
+        }
+      }
+    };
+    run(true);
+    // fallback for nodes with no monotone path: plain shortest path (rare)
+    const before = Float64Array.from(dist);
+    const nextM = Int32Array.from(next);
+    dist.fill(Infinity); next.fill(-1); run(false);
+    for (let i = 0; i < this.n; i++) if (Number.isFinite(before[i])) next[i] = nextM[i];
+    return next;
+  }
+
+  private _escape: Int32Array | null = null;
+  private _fireT: Float64Array | null = null;
+  /** Minute the fire reaches each node (cached). */
+  fireTimes(): Float64Array { return (this._fireT ??= this.nodeFireTimes()); }
+  /** Next step toward safety for every node (cached). Safe = more than 500 m by road from any street the fire
+   *  reaches; walkers only step toward streets the fire reaches later (see escapeRoutes). */
+  escape(): Int32Array {
+    if (this._escape) return this._escape;
+    const fd = new Float64Array(this.n), fp = new Int32Array(this.n);
+    this.dijkstra(this.fireNodes(), -1, fd, fp);
+    const safe: number[] = [];
+    for (let i = 0; i < this.n; i++) if (Number.isFinite(fd[i]) && fd[i] > 500) safe.push(i);
+    return (this._escape = this.escapeRoutes(safe, this.fireTimes()));
+  }
+
   /** Nodes touched by any street the fire closes (in the 3-hour scenario). */
   fireNodes(): number[] {
     const out: number[] = [];

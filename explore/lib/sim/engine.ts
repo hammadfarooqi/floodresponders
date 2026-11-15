@@ -9,12 +9,15 @@
 
 import { RoadGraph, meters, type RoadsJson } from "./graph.ts";
 
-export type Policy = "ours" | "nearest";
+// "calls" = today's dispatch (the baseline): trucks go only to buildings whose 911 call was answered, oldest call
+// first, closest free truck (CAD + AVL), no re-planning. "nearest" = older simple baseline. "ours" = Roll Call.
+export type Policy = "ours" | "calls" | "nearest";
 
 /** Every assumption in one place. The UI shows these. Values are assumptions, not measurements. */
 export interface SimConfig {
   self_evac_rate_per_min: number;   // share of people who can leave alone that leave each minute
   need_alone_rate_per_min: number;  // share of people who need help that still get out alone each minute
+  walk_m_per_min: { able: number; need: number };  // walking speed to safety along the streets
   assisted_people_per_min: number;  // people one truck crew brings out per minute
   truck_speed_kmh: number;          // average driving speed on hill streets during an evacuation
   rematch_every_min: number;        // AI only
@@ -25,20 +28,40 @@ export interface SimConfig {
                                               // "fleet" = whole-fleet assignment by people a crew can help (CONTRACTS phase 4, #80);
                                               // "priority" = most urgent first
   duration_min: number;
+  // 911 calls (both runs get the same calls; only "calls" depends on them to send a truck)
+  call_share: number;               // share of buildings with people who need help where someone calls 911
+  call_lead_min: [number, number];  // they call this many minutes before the fire reaches them (uniform)
+  call_takers: number;              // 911 call-takers working these calls
+  call_handle_min: number;          // minutes to take one call
+  seed: number;
 }
+
+export interface Call { id: number; building: string; t_call: number; t_answer: number; t_dispatch: number | null;
+                        truck: string | null; from: "911" | "supervisor" }
 
 export const DEFAULT_CONFIG: SimConfig = {
   self_evac_rate_per_min: 0.15,
   need_alone_rate_per_min: 0.01,
+  walk_m_per_min: { able: 80, need: 30 },
   assisted_people_per_min: 1.5,
   truck_speed_kmh: 30,
   rematch_every_min: 5,
   arrive_before_fire_min: 3,
-  withdraw_before_fire_min: 1,
+  withdraw_before_fire_min: 3,
   urgency_tau_min: 30,
   match_rule: "rate",
   duration_min: 180,
+  call_share: 0.7,
+  call_lead_min: [10, 60],
+  call_takers: 4,
+  call_handle_min: 2.5,
+  seed: 7,
 };
+
+function rng(seed: number) {
+  let x = seed >>> 0;
+  return () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 2 ** 32; };
+}
 
 export interface DemoBuildingLite {
   id: string; lat: number; lng: number;
@@ -73,6 +96,8 @@ export interface SimBuilding {
   stuck: number;       // people who cannot leave alone at all (a call reports them)
   evacuated: number; evacuatedNeed: number; trapped: number; trappedNeed: number;
   burned: boolean;
+  /** Last minute people can start walking out and still reach a safe street before the fire (per walking speed). */
+  safeAble: number; safeNeed: number;
 }
 
 export type LogKind = "assign" | "reassign" | "arrive" | "done" | "withdraw" | "unassign" | "call" | "event" | "burned";
@@ -107,6 +132,11 @@ export class Simulation {
   readonly buildings: SimBuilding[];
   readonly byId: Map<string, SimBuilding>;
   readonly trucks: Truck[];
+  /** 911 calls, made at the start (same seed in both runs). pending = answered, waiting for a truck ("calls"). */
+  calls: Call[] = [];
+  private callsMade = false;
+  private callPtr = 0;
+  private pending: Call[] = [];
   log: LogEntry[] = [];
   /** building idx whose people numbers changed visibly since the last drain (for feature-state) */
   dirty = new Set<number>();
@@ -139,7 +169,7 @@ export class Simulation {
           id: b.id, idx, lat: b.lat, lng: b.lng, node: this.g.buildingNode[b.id] ?? -1,
           fire: b.fire_arrival_min as number, label: buildingLabel(b), costar: !!b.costar,
           able: b.people_est - need, need, needKnown: need, hidden: 0, stuck: 0,
-          evacuated: 0, evacuatedNeed: 0, trapped: 0, trappedNeed: 0, burned: false,
+          evacuated: 0, evacuatedNeed: 0, trapped: 0, trappedNeed: 0, burned: false, safeAble: 0, safeNeed: 0,
         };
       });
     this.byId = new Map(this.buildings.map(b => [b.id, b]));
@@ -151,6 +181,18 @@ export class Simulation {
       unavailable_until: 0, served: 0,
     }));
     this.dist = this.trucks.map(() => new Float64Array(this.g.n));
+    // For each building: the last minute to start walking out along its street route and stay ahead of the fire.
+    const esc = this.g.escape(), fireT = this.g.fireTimes();
+    for (const b of this.buildings) {
+      let minA = b.fire, minN = b.fire, d = 0, px = b.lng, py = b.lat;
+      for (let v = b.node, n = 0; v >= 0 && n < 600; v = esc[v], n++) {
+        d += meters(px, py, this.g.lng[v], this.g.lat[v]); px = this.g.lng[v]; py = this.g.lat[v];
+        minA = Math.min(minA, fireT[v] - d / this.cfg.walk_m_per_min.able);
+        minN = Math.min(minN, fireT[v] - d / this.cfg.walk_m_per_min.need);
+      }
+      // 2-minute margin: street fire times come from the road graph, which is coarser than the 30 m fire grid
+      b.safeAble = minA - 2; b.safeNeed = minN - 2;
+    }
     this.prev = this.trucks.map(() => new Int32Array(this.g.n));
   }
 
@@ -181,10 +223,95 @@ export class Simulation {
 
   private say(e: Omit<LogEntry, "t">) { this.log.push({ t: this.t, ...e }); }
 
+  /** Who calls 911 and when; the queue at the call-takers gives each call its answer time. Deterministic. */
+  private makeCalls() {
+    this.callsMade = true;
+    const r = rng(this.cfg.seed), [lo, hi] = this.cfg.call_lead_min;
+    const raw: { b: SimBuilding; t: number }[] = [];
+    for (const b of this.buildings) {
+      const calls = r() < this.cfg.call_share, lead = lo + (hi - lo) * r();
+      if (b.need >= 0.5 && calls) raw.push({ b, t: Math.max(0.5, b.fire - lead) });
+    }
+    raw.sort((a, b) => a.t - b.t || (a.b.id < b.b.id ? -1 : 1));
+    const free = new Array(Math.max(1, this.cfg.call_takers)).fill(0);
+    for (const { b, t } of raw) {
+      let k = 0; for (let i = 1; i < free.length; i++) if (free[i] < free[k]) k = i;
+      const start = Math.max(t, free[k]); free[k] = start + this.cfg.call_handle_min;
+      this.calls.push({ id: this.calls.length, building: b.id, t_call: t, t_answer: start + this.cfg.call_handle_min,
+                        t_dispatch: null, truck: null, from: "911" });
+    }
+    this.calls.sort((a, b) => a.t_answer - b.t_answer || a.id - b.id);
+  }
+
+  /** A supervisor's call goes into the same 911 queue in the "calls" run (scripted moment). */
+  addCall(buildingId: string, from: Call["from"] = "supervisor") {
+    if (!this.callsMade) this.makeCalls();
+    const c: Call = { id: this.calls.length, building: buildingId, t_call: this.t, t_answer: this.t + this.cfg.call_handle_min,
+                      t_dispatch: null, truck: null, from };
+    this.calls.push(c);
+    this.calls.sort((a, b) => a.t_answer - b.t_answer || a.id - b.id);
+    this.callPtr = this.calls.findIndex(x => x.t_answer > this.t);
+    if (this.callPtr < 0) this.callPtr = this.calls.length;
+  }
+
+  /** Calls whose building still waits: rung, no truck yet, building not burned and not empty. */
+  ringing(): Call[] {
+    return this.calls.filter(c => c.t_call <= this.t && c.t_dispatch === null && (() => {
+      const b = this.byId.get(c.building)!; return !b.burned && b.need >= 0.5; })());
+  }
+
+  private answerCalls() {
+    while (this.callPtr < this.calls.length && this.calls[this.callPtr].t_answer <= this.t) {
+      const c = this.calls[this.callPtr++];
+      const b = this.byId.get(c.building)!;
+      if (b.burned) continue;
+      if (this.policy === "calls") {
+        this.pending.push(c); this.needFill = true;
+        this.say({ kind: "call", building: b.id, speaker: "Dispatcher",
+          text: `911 call answered: ${b.label} needs help (waited ${mins(this.t - c.t_call)}). ${this.pending.length} calls waiting for a truck.` });
+      } else if (this.policy === "ours") {
+        // the caller tells dispatch how many people need help; Roll Call uses it like any other call
+        if (b.need - b.needKnown >= 0.5) { b.needKnown = b.need; this.needRematch = true; }
+        c.t_dispatch = this.trucks.some(tr => tr.building === b.id) ? this.t : null;
+      }
+    }
+  }
+
+  /** Today's dispatch: oldest answered call first, closest free truck (by road), no re-planning. */
+  private scratchD: Float64Array | null = null;
+  private scratchP: Int32Array | null = null;
+  private assignCalls() {
+    const idle = new Map<number, number>();   // routing source node -> truck index
+    this.trucks.forEach((tr, ti) => { if (tr.status === "idle") idle.set(this.source(tr).node, ti); });
+    if (!idle.size || !this.pending.length) return;
+    this.scratchD ??= new Float64Array(this.g.n); this.scratchP ??= new Int32Array(this.g.n);
+    const keep: Call[] = [];
+    for (const c of this.pending) {
+      const b = this.byId.get(c.building)!;
+      if (b.burned) continue;                       // the fire got there first: the call is closed
+      if (!idle.size) { keep.push(c); continue; }
+      // closest free truck = the first truck reached when searching the streets outward from the building
+      const hit = this.g.dijkstra(b.node, this.t, this.scratchD, this.scratchP, Infinity, Infinity, 0, n => idle.has(n));
+      if (hit < 0) { keep.push(c); continue; }
+      const ti = idle.get(hit)!; idle.delete(hit);
+      const tr = this.trucks[ti], src = this.source(tr);
+      // the truck's own route, searched only until it reaches the building
+      this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], Infinity, this.speedMpm, src.offset, n => n === b.node);
+      if (!Number.isFinite(this.dist[ti][b.node])) { keep.push(c); idle.set(hit, ti); continue; }
+      c.t_dispatch = this.t; c.truck = tr.id;
+      this.dispatch(tr, ti, b, src.offset, `911 call from ${mins(this.t - c.t_call)} ago; closest free truck.`);
+    }
+    this.pending = keep;
+  }
+
   private tick() {
     const t0 = this.t, t1 = Math.round((this.t + DT) * 1000) / 1000;
+    if (!this.callsMade) this.makeCalls();
+    this.answerCalls();
     // dispatch first, so a truck freed in the last tick is used now
-    if (this.policy === "ours") {
+    if (this.policy === "calls") {
+      if (this.needFill) { this.needFill = false; this.assignCalls(); }
+    } else if (this.policy === "ours") {
       if (t0 >= this.nextMatch || this.needRematch) this.rematch(true);
       else if (this.needFill) this.rematch(false);
     } else if (this.needFill || Math.abs(t0 - Math.round(t0)) < 1e-6) {
@@ -223,10 +350,12 @@ export class Simulation {
         b.able = 0; b.need = 0; b.needKnown = 0; b.burned = true; this.dirty.add(b.idx);
         continue;
       }
-      const a = b.able * selfFrac;
-      let h = Math.max(0, b.need - b.stuck) * aloneFrac;
+      // people only start walking out while they can still get ahead of the fire; after that they stay (trapped)
+      const a = t1 <= b.safeAble ? b.able * selfFrac : 0;
+      const canGo = t1 <= b.safeNeed;
+      let h = canGo ? Math.max(0, b.need - b.stuck) * aloneFrac : 0;
       const k = crews.get(b.idx) ?? 0;
-      if (k > 0) h += Math.min(b.need - h, k * this.cfg.assisted_people_per_min * DT);
+      if (k > 0 && canGo) h += Math.min(b.need - h, k * this.cfg.assisted_people_per_min * DT);
       b.able -= a; b.need -= h; b.evacuated += a + h; b.evacuatedNeed += h;
       b.stuck = Math.min(b.stuck, b.need);
       b.needKnown = Math.min(b.needKnown, b.need);
@@ -234,7 +363,8 @@ export class Simulation {
         for (const tr of this.trucks) if (tr.status === "on_scene" && tr.building === b.id) tr.served += h / k;
       }
       if (b.need < 1e-6) b.need = 0;
-      if (Math.round(b.able + b.need) !== before) this.dirty.add(b.idx);
+      // any departure marks the building: the map creates walker dots the moment people leave (not later)
+      if (a + h > 0 || Math.round(b.able + b.need) !== before) this.dirty.add(b.idx);
     }
   }
 
@@ -264,7 +394,7 @@ export class Simulation {
         if (b.need < 0.05) {
           this.say({ kind: "done", truck: tr.id, building: b.id, text: `${tr.name} cleared ${b.label}.` });
           this.free(tr);
-        } else if (b.fire - this.t <= this.cfg.withdraw_before_fire_min) {
+        } else if (b.fire - this.t <= this.cfg.withdraw_before_fire_min || this.t >= b.safeNeed) {
           this.say({ kind: "withdraw", truck: tr.id, building: b.id,
             text: `${tr.name} pulls out of ${b.label}: fire arriving, ${Math.round(b.need)} still inside.` });
           this.free(tr);
@@ -354,6 +484,11 @@ export class Simulation {
     });
   }
 
+  /** Latest useful arrival: before the fire (with margin), and early enough to walk people out to safety. */
+  deadline(b: SimBuilding): number {
+    return Math.min(b.fire - this.cfg.arrive_before_fire_min, b.safeNeed - 1);
+  }
+
   // ---------- AI: people needing help x urgency, feasible before the fire, re-match ----------
   priority(b: SimBuilding): number {
     const left = Math.max(0, b.fire - this.t);
@@ -393,7 +528,7 @@ export class Simulation {
       proposals.push({ truck: tr.id, building: b.id, eta_min: Math.max(0, eta),
         reason: `${Math.round(b.needKnown)} need help.`, prev: tr.building });
     };
-    const inTime = (b: SimBuilding, eta: number) => this.t + eta <= b.fire - this.cfg.arrive_before_fire_min;
+    const inTime = (b: SimBuilding, eta: number) => this.t + eta <= this.deadline(b);
     if (this.cfg.match_rule === "fleet") {
       this.fleetMatch(free, srcs, full, proposals, open);
     } else if (this.cfg.match_rule === "rate") {
@@ -436,7 +571,7 @@ export class Simulation {
     // en-route trucks with no useful target left stop where they are
     for (const { tr } of free) if (tr.status === "en_route" && !chosen.has(tr.id)) {
       const b = this.byId.get(tr.building!)!;
-      if (b.burned || b.needKnown <= 0.5 || this.t > b.fire - this.cfg.arrive_before_fire_min) {
+      if (b.burned || b.needKnown <= 0.5 || this.t > this.deadline(b)) {
         const why = b.needKnown <= 0.5 && !b.burned ? "nobody left who needs help" : "cannot arrive before the fire";
         this.say({ kind: "unassign", truck: tr.id, building: b.id, text: `${tr.name} called off ${b.label}: ${why}.` });
         this.free(tr);
@@ -465,8 +600,8 @@ export class Simulation {
         const row = free.map(({ tr }, i) => {
           if ((this.vetoes.get(`${tr.id}|${b.id}`) ?? -1) > this.t) return 0;
           const e = eta(i, b);
-          if (!Number.isFinite(e) || this.t + e > b.fire - this.cfg.arrive_before_fire_min) return 0;
-          const cap = rate * Math.max(0, b.fire - this.cfg.withdraw_before_fire_min - this.t - e);
+          if (!Number.isFinite(e) || this.t + e > this.deadline(b)) return 0;
+          const cap = rate * Math.max(0, Math.min(b.fire - this.cfg.withdraw_before_fire_min, b.safeNeed) - this.t - e);
           const people = Math.min(cap, Math.max(0, b.needKnown - slot * cap));
           if (people < 0.5) return 0;
           const keepBonus = tr.building === b.id ? rate * 3 : 0;
