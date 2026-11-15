@@ -140,8 +140,21 @@ or CoStar while it runs.
   time. Policy `"nearest"` is the comparison. Both are pure functions over the same state.
 - **Routing:** the shortest path on `RoadGraph` from the unit to `building_node` of the building. Units start at
   `Station.node`. The graph is undirected, because responders ignore one-way rules.
-- **The fire closes streets.** An edge with `fire_min` at or before the current minute cannot be used. A route
-  that was valid can become invalid, so travel times change during the run.
+- **The fire closes streets.** A unit may use an edge only if it finishes crossing the edge before `fire_min`.
+  Check the minute the unit reaches the edge, not the minute it leaves. A route that was valid can become
+  invalid, so travel times change during the run.
+- **Input from phase 3, per building:** `building_id`, `priority` (building only: it must not include distance or
+  travel time, because matching adds those), `people_need_help` (estimate, or the number a call confirmed), and
+  `fire_arrival_min`.
+- **Policy `"ours"` matches the whole fleet at once,** not one building at a time. The value of a unit-building
+  pair is the number of people that crew can help between arrival and `withdraw_before_fire_min`, with the road
+  ETA. A second unit at the same building counts only the extra people it can help. A unit may stay idle.
+- **Order of checks for each pair:** (1) a route exists that avoids closed streets; (2) the real ETA meets the fire
+  deadline; (3) only then add the small bonus that keeps a unit on its current building. Do not cut the list to
+  the top N buildings before you check (1) and (2).
+- **No building is ignored.** If no unit can reach a building in time, flag it. After the main match, a unit that
+  would stay idle goes to the flagged building with the highest priority, by a safe route. The log calls this a
+  check, not a rescue, and the simulation does not count it as one.
 - **When to match again:** every `rematch_every_min` simulated minutes, and after each `AgentEvent` from phase 6.
   A unit that is already on the road can get a new building.
 - **Each assignment has a `reason`.** Phase 5 shows it, and phase 6 says it on the phone.
@@ -180,8 +193,10 @@ plan.
 - **The call produces an event, and the agent does not edit the plan directly.**
   `handle_event(state, event)` returns `AgentAction`s: a `rematch` from phase 4, and `notify` messages to the
   people affected.
-- **Events today:** `driver_declines` and `tenant_stuck`. There is no event yet for "everyone is out of the
-  building", which would free the unit for another building. To add it, change `AgentEvent` in this file.
+- **Events:** `driver_declines`, `tenant_stuck` and `building_cleared`. A `building_cleared` report with
+  `people_remaining: 0` removes the building from the queue, and the unit sent there is matched again at once,
+  from where it is now. A report with `people_remaining > 0` sets the number still needing help. For the
+  hackathon we trust the report.
 - **Voice is a separate layer.** The conversation logic must work with text in and text out, so that a real phone
   call, a voice in the browser and a simulated manager all use the same code. The provider is TBD.
 - **Call data is personal.** Keep it in memory only and delete it when the simulation is reset.
@@ -295,6 +310,7 @@ SimConfig {                          # all assumptions in one place, shown in th
 AgentEvent =
   | { type: "driver_declines", truck_id, building_id, reason }
   | { type: "tenant_stuck", building_id, count, note }
+  | { type: "building_cleared", building_id, people_remaining: int, note }   # 0 = everyone who needs help is out
 AgentAction =
   | { type: "rematch", assignments: [Assignment] }
   | { type: "notify", to: "truck" | "supervisor", id: string, message: string }
