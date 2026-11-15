@@ -119,7 +119,10 @@ export default function ConsoleView() {
     ];
     renderer.current?.reset(s);
     const m = map.current;
-    if (m && followRef.current) requestAnimationFrame(() => frameSim(m, s, 0));
+    if (m && followRef.current) {
+      requestAnimationFrame(() => frameSim(m, s, 0));
+      setTimeout(() => { if (followRef.current && sim.current === s) frameSim(m, s, 400); }, 700);
+    }
     setPlaying(false); setSelBld(null); setSelUnit(null);
     s.advanceTo(0.1);   // first match: proposals appear at once
     syncFeed(); draw(); refresh();

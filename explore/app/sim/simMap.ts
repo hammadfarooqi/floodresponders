@@ -54,10 +54,14 @@ export function freePadding(m: maplibregl.Map): maplibregl.PaddingOptions {
   for (const c of document.querySelectorAll<HTMLElement>(".card")) {
     const r = c.getBoundingClientRect();
     if (!r.width || !r.height || c.classList.contains("result")) continue;
-    // a card on the left or right side covers that side; a wide low card covers the bottom
-    if (r.height > H * 0.4 && r.left < W * 0.3) pad.left = Math.max(pad.left, r.right - box.left + 40);
-    else if (r.height > H * 0.4 && r.right > W * 0.7) pad.right = Math.max(pad.right, box.right - r.left + 40);
-    else if (r.top > H * 0.5) pad.bottom = Math.max(pad.bottom, box.bottom - r.top + 16);
+    // By position, not height: a card in the top-left corner covers the left side, one in the top-right corner the
+    // right side, a low card the bottom. (Height failed: right after load the left card is still short, so the first
+    // frame put the fire under it.) Small cards along the top fit in the top margin.
+    const x0 = r.left - box.left, x1 = r.right - box.left, y0 = r.top - box.top;
+    if (y0 < H * 0.3 && r.height < 80) continue;
+    if (y0 < H * 0.3 && x0 < W * 0.3) pad.left = Math.max(pad.left, x1 + 40);
+    else if (y0 < H * 0.3 && x1 > W * 0.7) pad.right = Math.max(pad.right, W - x0 + 40);
+    else if (y0 > H * 0.5) pad.bottom = Math.max(pad.bottom, H - y0 + 16);
   }
   // keep at least 240 x 200 px of map; shrink the side padding if the screen is too small
   const over = pad.left + pad.right + 240 - W;

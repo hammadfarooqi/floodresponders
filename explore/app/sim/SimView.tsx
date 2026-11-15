@@ -75,6 +75,8 @@ export default function SimView() {
       // a drag, wheel or pinch by the user stops the follow camera (events from easeTo have no originalEvent)
       const stop = (e: { originalEvent?: unknown }) => { if (e.originalEvent) setFollow(false); };
       m.on("dragstart", stop); m.on("zoomstart", stop); m.on("rotatestart", stop); m.on("pitchstart", stop);
+      // a window resize changes the free area: frame again
+      m.on("resize", () => { if (followRef.current && sim.current) frameSim(m, sim.current, 0); });
       m.on("mouseenter", "buildings", () => { m.getCanvas().style.cursor = "pointer"; });
       m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
       setReady(true);
@@ -102,7 +104,11 @@ export default function SimView() {
     renderer.current?.reset(s);
     setLines([]); setPolicy(p); setPlaying(false);
     draw();
-    if (followRef.current) requestAnimationFrame(() => frameSim(m, s, 0));
+    if (followRef.current) {
+      requestAnimationFrame(() => frameSim(m, s, 0));
+      // once more after React has drawn the panels for this run (their size changes the free area)
+      setTimeout(() => { if (followRef.current && sim.current === s) frameSim(m, s, 400); }, 700);
+    }
     setFrame(f => f + 1);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
