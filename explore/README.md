@@ -22,6 +22,13 @@ Interior layouts: `data/pipeline/interior_layouts.py` writes `data/demo/interior
 The scans are leasing tours of sample apartments: the plan is a typical apartment of the building, not a known unit,
 and the scans do not cover hallways or stairs. Only rooms that Matterport labels "Bedroom" are on the route.
 
+Route inside the 3D tour: run `explore/scripts/get_matterport_bundle.sh` once, then start the dev server again. The
+script downloads Matterport's viewer ("SDK Bundle", 27 MB, not in git) into `public/matterport-bundle/` and copies
+`MATTERPORT_SDK_KEY` from the root `.env` into `explore/.env.local`. The "3D tour" tab then draws the route as a green
+line on the floor, with a numbered sign at each bedroom (`app/interior/Tour3D.tsx`). Without the bundle or the key, the
+tab shows the plain public tour with no line. Our key works on localhost with scans of other accounts (checked
+2026-11-14); another host name must be added to the key in the Matterport account first.
+
 Result with default assumptions (fire stops at Hollywood Blvd): old way 193 trapped, AI 32 (84% fewer). The AI is
 better under each single assumption change we tried (crew speed, truck speed 20–45 km/h, leaving rates, urgency
 scale, re-match interval). Simulated; not a count of real lives.
