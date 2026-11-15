@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { Simulation, mins, type Proposal, type SimBuilding, type Truck } from "../../lib/sim/engine";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
-import { COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, setHills, type Loaded } from "../sim/simMap";
+import { COLORS, SimRenderer, TRUCK_CSS, fmtT, frameSim, loadSimLayers, n0, setHills, type Loaded } from "../sim/simMap";
 
 const DURATION = 180;
 const VIEW = { center: [-118.327, 34.0965] as [number, number], zoom: 13.55, pitch: 35, bearing: 0 };
@@ -55,6 +55,7 @@ export default function ConsoleView() {
   const [editing, setEditing] = useState<number | null>(null);
   const [hills, setHillsUi] = useState(false);
   const refresh = () => setFrame(f => f + 1);
+  const followRef = useRef(true);
 
   // ---------- setup ----------
   useEffect(() => {
@@ -64,7 +65,12 @@ export default function ConsoleView() {
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.current = m;
     (window as unknown as { __map?: maplibregl.Map }).__map = m;
+    Object.defineProperty(window, "__sim", { configurable: true, get: () => sim.current });
+    Object.defineProperty(window, "__renderer", { configurable: true, get: () => renderer.current });
     m.once("load", () => setHills(m, false));
+    // follow camera: keeps all 8 trucks and the buildings in view until the user moves the map (then "follow" turns off)
+    const stop = (e: { originalEvent?: unknown }) => { if (e.originalEvent) followRef.current = false; };
+    m.on("dragstart", stop); m.on("zoomstart", stop); m.on("rotatestart", stop); m.on("pitchstart", stop);
     loadSimLayers(m).then(d => {
       data.current = d;
       renderer.current = new SimRenderer(m, d);
@@ -112,6 +118,8 @@ export default function ConsoleView() {
       { t: STUCK.call_min, title: "Supervisor: tenants stuck", fn: s2 => { callAt.current = s2.t; return tenantStuck(s2); }, done: false },
     ];
     renderer.current?.reset(s);
+    const m = map.current;
+    if (m && followRef.current) requestAnimationFrame(() => frameSim(m, s, 0));
     setPlaying(false); setSelBld(null); setSelUnit(null);
     s.advanceTo(0.1);   // first match: proposals appear at once
     syncFeed(); draw(); refresh();
@@ -240,7 +248,7 @@ export default function ConsoleView() {
   // ---------- playback ----------
   useEffect(() => {
     if (!playing) return;
-    let raf = 0, last = performance.now(), lastUi = 0;
+    let raf = 0, last = performance.now(), lastUi = 0, lastCam = 0;
     const loop = (now: number) => {
       const s = sim.current!;
       // update at most 30 times a second: the map redraws on every change, and a busy laptop cannot keep up with 120
@@ -263,6 +271,7 @@ export default function ConsoleView() {
         if (p.applied) return (now - p.wall) / 1000 < REVIEW_SECONDS && tr?.building === p.building;
         return b && !b.burned && b.needKnown > 0.5 && tr && tr.status !== "unavailable" && tr.building !== p.building; });
       syncFeed(); draw(s.done);
+      if (followRef.current && map.current && now - lastCam > 2000) { lastCam = now; frameSim(map.current, s, 1500); }
       if (now - lastUi > 120 || s.done) { lastUi = now; refresh(); }
       if (s.done) { setPlaying(false); return; }
       raf = requestAnimationFrame(loop);
@@ -327,6 +336,8 @@ export default function ConsoleView() {
           <button className="seg" onClick={start} disabled={!ready}>reset</button>
           <button className={`seg ${hills ? "on" : ""}`} title="Real hill heights. Prettier, but slower while playing."
             onClick={() => { const v = !hills; setHillsUi(v); if (map.current) setHills(map.current, v); }}>3D hills</button>
+          <button className="seg" title="Keep all 8 trucks and the buildings in view (moving the map turns this off)."
+            onClick={() => { followRef.current = true; if (map.current && sim.current) frameSim(map.current, sim.current, 800); }}>follow trucks</button>
         </div>
         <div className="mode">
           AI pairings:

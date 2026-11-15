@@ -124,3 +124,57 @@ test("assignMax finds the best total on random small tables (checked by brute fo
     assert.equal(total, best(val, m));
   }
 });
+
+// ---------- policy "calls" (today's 911 dispatch, the baseline) ----------
+// Every building with people who need help calls (call_share 1), exactly 10 min before the fire; 1 call-taker, 2.5 min
+// a call. People who need help do not leave alone, so only trucks change anything.
+const CALLS = { truck_speed_kmh: 60, need_alone_rate_per_min: 0, call_share: 1, call_lead_min: [10, 10] as [number, number],
+                call_takers: 1, call_handle_min: 2.5 };
+
+test("calls: the oldest answered call gets the truck, and a newer, closer call does not take it away", () => {
+  // Station (x=0) - NEAR (x=1000) - FAR (x=8000). Calls come 20 min before the fire.
+  // FAR calls first (fire 50 -> call 30, answered 32.5, truck there at 40.5); NEAR calls later (fire 55 -> call 35,
+  // answered 37.5) while the truck still drives to FAR. Today the truck keeps going to FAR.
+  const r = line([0, 1000, 8000]);
+  const buildings = [bld("NEAR", 1, r, 5, 55), bld("FAR", 2, r, 5, 50)];
+  const s = new Simulation({ roads: r, buildings, stations: [station(1, 0)] }, "calls", { ...CALLS, call_lead_min: [20, 20] });
+  s.advanceTo(33);
+  assert.equal(s.trucks[0].building, "FAR");
+  s.advanceTo(38);
+  assert.equal(s.trucks[0].building, "FAR");
+  assert.equal(s.trucks[0].status, "en_route");
+  assert.equal(s.ringing().map(c => c.building).join(), "NEAR");
+});
+
+test("calls: the closest free truck by road goes, not the first in the list", () => {
+  // Station 1 (x=0, listed first) - B (x=6000) - station 2 (x=8000).
+  const r = line([0, 6000, 8000]);
+  const buildings = [bld("B", 1, r, 5, 40)];
+  const s = new Simulation({ roads: r, buildings, stations: [station(1, 0), station(2, 2)] }, "calls", CALLS);
+  s.advanceTo(33);   // call at 30, answered at 32.5
+  assert.equal(s.trucks.find(t => t.station === 2)!.building, "B");
+  assert.equal(s.trucks.find(t => t.station === 1)!.status, "idle");
+});
+
+test("calls: a building that never calls gets no truck (Roll Call sends one)", () => {
+  const r = line([0, 2000]);
+  const buildings = [bld("B", 1, r, 5, 40)];
+  const quiet = new Simulation({ roads: r, buildings, stations: [station(1, 0)] }, "calls", { ...CALLS, call_share: 0 });
+  quiet.advanceTo(45);
+  assert.equal(quiet.trucks[0].building, null);
+  assert.equal(quiet.trucks[0].status, "idle");
+  assert.ok(quiet.counts.trapped >= 4.5, "the 5 people who need help are trapped");
+  const ours = new Simulation({ roads: r, buildings: [bld("B", 1, line([0, 2000]), 5, 40)], stations: [station(1, 0)] },
+                             "ours", { ...CALLS, call_share: 0 });
+  ours.advanceTo(45);
+  assert.ok(ours.counts.trapped < 0.5, "Roll Call does not wait for a call");
+});
+
+test("calls: calls wait in line for the call-taker", () => {
+  // Two buildings call at the same minute (both fires at 40 -> calls at 30); 1 call-taker takes 2.5 min per call.
+  const r = line([0, 1000, 2000]);
+  const buildings = [bld("A", 1, r, 5, 40), bld("B", 2, r, 5, 40)];
+  const s = new Simulation({ roads: r, buildings, stations: [station(1, 0), station(2, 0)] }, "calls", CALLS);
+  s.advanceTo(1);
+  assert.deepEqual(s.calls.map(c => c.t_answer).sort((a, b) => a - b), [32.5, 35]);
+});

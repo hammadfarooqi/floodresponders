@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { DEFAULT_CONFIG, Simulation, type LogEntry, type Policy } from "../../lib/sim/engine";
-import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, setHills, type Loaded } from "./simMap";
+import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, SimRenderer, TRUCK_CSS, fmtT, frameSim, loadSimLayers, n0, setHills, type Loaded } from "./simMap";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 
 const DURATION = 180, RUN_SECONDS = 25;
@@ -39,7 +39,13 @@ export default function SimView() {
   const [results, setResults] = useState<Partial<Record<Policy, Counts>>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [hills, setHillsUi] = useState(false);
-  const [legendOpen, setLegendOpen] = useState(true);
+  // small screens: the feed and the legend start closed, so the trucks have room (a 1000 px wide window left 190 px)
+  const [legendOpen, setLegendOpen] = useState(() => typeof window === "undefined" || window.innerHeight >= 900);
+  const [feedOpen, setFeedOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 1400);
+  // the camera follows the trucks (all 8 + the buildings stay in the free part of the screen) until the user moves the map
+  const [follow, setFollow] = useState(true);
+  const followRef = useRef(true);
+  followRef.current = follow;
 
   // ---------- load data + map ----------
   useEffect(() => {
@@ -65,6 +71,9 @@ export default function SimView() {
           `Inside: ${n0(b.able + b.need)} (need help: ${n0(b.need)})<br>Evacuated: ${n0(b.evacuated)}<br>Trapped: ${n0(b.trapped)}` +
           `${b.costar ? "<br>CoStar: manager phone on file" : ""}</div>`).addTo(m);
       });
+      // a drag, wheel or pinch by the user stops the follow camera (events from easeTo have no originalEvent)
+      const stop = (e: { originalEvent?: unknown }) => { if (e.originalEvent) setFollow(false); };
+      m.on("dragstart", stop); m.on("zoomstart", stop); m.on("rotatestart", stop); m.on("pitchstart", stop);
       m.on("mouseenter", "buildings", () => { m.getCanvas().style.cursor = "pointer"; });
       m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
       setReady(true);
@@ -92,10 +101,18 @@ export default function SimView() {
     renderer.current?.reset(s);
     setLines([]); setPolicy(p); setPlaying(false);
     draw();
+    if (followRef.current) requestAnimationFrame(() => frameSim(m, s, 0));
     setFrame(f => f + 1);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (ready) start("calls"); }, [ready, start]);
+  // a call opens the feed (the transcript is part of the story); the free area changed, so frame again
+  // (wide screens only: on a narrow screen the feed would cover the map, so the call shows in a small box instead)
+  useEffect(() => { if (lines.length && window.innerWidth >= 1400) setFeedOpen(true); }, [lines.length]);
+  useEffect(() => {
+    const m = map.current, s0 = sim.current;
+    if (m && s0 && followRef.current) requestAnimationFrame(() => frameSim(m, s0, 600));
+  }, [feedOpen, legendOpen]);
 
   // force = redraw everything now (after a user action); the play loop passes false (moving layers ~20/s)
   const draw = (force = true) => { if (sim.current) renderer.current?.draw(sim.current, [], force); };
@@ -103,7 +120,7 @@ export default function SimView() {
   // ---------- playback ----------
   useEffect(() => {
     if (!playing) return;
-    let raf = 0, last = performance.now(), lastUi = 0;
+    let raf = 0, last = performance.now(), lastUi = 0, lastCam = 0;
     const loop = (now: number) => {
       const s = sim.current;
       if (!s) return;
@@ -128,6 +145,8 @@ export default function SimView() {
       }
       logSeen.current = s.log.length;
       draw(s.done);
+      // camera: at most every 2 s, a 1.5 s ease (each move redraws the whole map, so not every frame)
+      if (followRef.current && map.current && now - lastCam > 2000) { lastCam = now; frameSim(map.current, s, 1500); }
       if (now - lastUi > 100 || pause || s.done) { lastUi = now; setFrame(f => f + 1); }
       if (s.done) { setResults(r => ({ ...r, [s.policy]: s.counts })); setPlaying(false); return; }
       if (pause) { setPlaying(false); return; }
@@ -187,6 +206,8 @@ export default function SimView() {
           <button className="chip" onClick={skipToEnd} disabled={!ready || !!s?.done}>skip to end</button>
           <button className={`chip ${hills ? "on" : ""}`} title="Real hill heights. Prettier, but slower while playing."
             onClick={() => { const v = !hills; setHillsUi(v); if (map.current) setHills(map.current, v); }}>3D hills</button>
+          <button className={`chip ${follow ? "on" : ""}`} title="Keep all 8 trucks and the buildings in view"
+            onClick={() => { setFollow(true); if (map.current && s) frameSim(map.current, s, 800); }}>follow trucks</button>
           <label className="chk"><input type="checkbox" checked={pauseOnCalls} onChange={e => setPauseOnCalls(e.target.checked)} /> pause on calls</label>
         </div>
         {c && (
@@ -218,7 +239,16 @@ export default function SimView() {
       </div>
 
       {/* right: agent calls + dispatch feed */}
-      <div className="card right">
+      {!feedOpen && lines.length > 0 && (
+        <div className="card toast">
+          {lines.slice(-2).map((l, i) => (
+            <div key={i} className={`ln ${l.speaker.replace(" ", "")}`}>
+              <div className="who">{fmtT(l.t)} · {l.speaker}{l.to ? ` → ${l.to}` : ""}</div><div>{l.text}</div>
+            </div>))}
+        </div>)}
+      {!feedOpen && <button className="card feedbtn" onClick={() => setFeedOpen(true)}>{policy === "ours" ? "calls + " : ""}dispatch feed ◂</button>}
+      {feedOpen && <div className="card right">
+        <button className="lgt close" onClick={() => setFeedOpen(false)}>hide ▸</button>
         {(policy === "ours" || lines.length > 0) && (
           <>
             <div className="h">{policy === "ours" ? "Agent calls" : "Calls"} <span className="tag">scripted demo transcript</span></div>
@@ -236,7 +266,7 @@ export default function SimView() {
           {feed.map((e, i) => (
             <div key={i} className={`ev ${e.kind}`}><span className="tm">{fmtT(e.t)}</span>{e.text}</div>))}
         </div>
-      </div>
+      </div>}
 
       {/* legend */}
       <div className={`card legend ${legendOpen ? "" : "closed"}`}>
@@ -330,6 +360,9 @@ const CSS = `
 .ev{padding:3px 0;border-bottom:1px solid #ffffff0d;color:#d4d4d8}
 .ev .tm{color:#71717a;font-variant-numeric:tabular-nums;margin-right:6px}
 .ev.reassign{color:#fde68a}.ev.withdraw,.ev.unassign{color:#fca5a5}.ev.call{color:#c4b5fd}.ev.arrive{color:#86efac}
+.toast{left:50%;transform:translateX(-50%);bottom:44px;width:min(440px,calc(100vw - 420px));padding:8px;display:flex;flex-direction:column;gap:6px}
+.feedbtn{top:12px;right:56px;padding:6px 10px;color:#e4e4e7;font:inherit;font-size:12px;cursor:pointer}
+.right .close{position:absolute;top:10px;right:12px}
 .legend{left:64px;bottom:12px;padding:6px 10px 8px;font-size:11px;display:grid;grid-template-columns:auto auto;column-gap:16px;row-gap:2px;color:#f4f4f5;max-width:560px}
 .legend .lh,.legend .lgt{grid-column:1/-1}
 .legend.closed{display:block;padding:4px 8px}

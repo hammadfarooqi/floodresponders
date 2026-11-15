@@ -38,6 +38,47 @@ export function setHills(m: maplibregl.Map, on: boolean) {
   m.setTerrain(on ? { source: "dem", exaggeration: 1.4 } : null);
 }
 
+/** Last free area measured (px from each side of the map); the truck spread stays inside it. */
+let lastFree = { top: 0, bottom: 0, left: 0, right: 0 };
+
+/** Free part of the screen: the map minus the cards that float over it (.card elements that are shown). */
+export function freePadding(m: maplibregl.Map): maplibregl.PaddingOptions {
+  const box = m.getContainer().getBoundingClientRect(), W = box.width, H = box.height;
+  // (a raised ladder reaches ~25 px above the icon, so rows of the spread are 46 px apart)
+  // room for the truck icon itself (58 x 36 px, anchored at its bottom centre, + label above) and the zoom buttons
+  const pad = { top: 70, bottom: 20, left: 40, right: 70 };
+  for (const c of document.querySelectorAll<HTMLElement>(".card")) {
+    const r = c.getBoundingClientRect();
+    if (!r.width || !r.height || c.classList.contains("result")) continue;
+    // a card on the left or right side covers that side; a wide low card covers the bottom
+    if (r.height > H * 0.4 && r.left < W * 0.3) pad.left = Math.max(pad.left, r.right - box.left + 40);
+    else if (r.height > H * 0.4 && r.right > W * 0.7) pad.right = Math.max(pad.right, box.right - r.left + 40);
+    else if (r.top > H * 0.5) pad.bottom = Math.max(pad.bottom, box.bottom - r.top + 16);
+  }
+  // keep at least 240 x 200 px of map; shrink the side padding if the screen is too small
+  const over = pad.left + pad.right + 240 - W;
+  if (over > 0) { pad.left = Math.max(10, pad.left - over / 2); pad.right = Math.max(10, pad.right - over / 2); }
+  if (pad.top + pad.bottom + 200 > H) pad.bottom = Math.max(10, H - pad.top - 200);
+  lastFree = { top: 0, bottom: Math.max(0, pad.bottom - 20), left: Math.max(0, pad.left - 40), right: Math.max(0, pad.right - 40) };
+  return pad;
+}
+
+/** Camera that keeps every truck and every building the fire reaches inside the free part of the screen. */
+export function frameSim(m: maplibregl.Map, s: Simulation, duration: number) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const add = (x: number, y: number) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); };
+  for (const b of s.buildings) add(b.lng, b.lat);
+  for (const tr of s.trucks) add(tr.lng, tr.lat);
+  if (!isFinite(x0)) return;
+  const cam = m.cameraForBounds([[x0, y0], [x1, y1]], { padding: freePadding(m), pitch: m.getPitch(), bearing: m.getBearing() });
+  if (!cam) return;
+  const c = m.getCenter(), z = m.getZoom(), tc = maplibregl.LngLat.convert(cam.center!);
+  // do not move for tiny changes (each camera move redraws the whole map)
+  const moved = m.project(tc).dist(m.project(c));
+  if (duration > 0 && moved < 25 && Math.abs((cam.zoom ?? z) - z) < 0.08) return;
+  m.easeTo({ ...cam, pitch: m.getPitch(), bearing: m.getBearing(), duration, essential: true });
+}
+
 export const fmtT = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 export const n0 = (x: number) => Math.round(x).toLocaleString("en-US");
 
@@ -92,7 +133,7 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
 
 /** Draws one Simulation on the map. Call reset() when a new Simulation starts, draw() every frame. */
 export class SimRenderer {
-  private markers = new Map<string, { m: maplibregl.Marker; el: HTMLDivElement; lng: number }>();
+  private markers = new Map<string, { m: maplibregl.Marker; el: HTMLDivElement; lng: number; lift: number }>();
   private walkers: Walker[] = [];
   private spawned = new Float64Array(0);
   private spawnedNeed = new Float64Array(0);
@@ -102,11 +143,14 @@ export class SimRenderer {
   private fire = { burn: 0, cool: 0, bld: 0 };
   private lastPush = -1e9;
   private ringKey = "";   // wall time of the last setData on the moving layers
+  private size = { w: 0, h: 0 };          // map size in px (read on resize, not every frame)
   onTruckClick?: (id: string) => void;
 
   constructor(private m: maplibregl.Map, private d: Loaded) {
     // the same street routes to safety the engine uses to decide who can still get out (RoadGraph.escape)
     this.escape = d.g.escape();
+    const measure = () => { const c = m.getContainer(); this.size = { w: c.clientWidth, h: c.clientHeight }; };
+    measure(); m.on("resize", measure);
   }
 
   private route(s: Simulation, idx: number): Route {
@@ -146,22 +190,59 @@ export class SimRenderer {
     for (const tr of s.trucks) {
       const e = document.createElement("div");
       e.className = "truck";
-      e.innerHTML = TRUCK_SVG + `<span class="num">${tr.station}</span>`;
+      e.innerHTML = TRUCK_SVG + `<span class="num">${tr.station}</span><span class="say"></span>`;
       e.dataset.status = tr.status;
       e.addEventListener("click", ev => { ev.stopPropagation(); this.onTruckClick?.(tr.id); });
       const mk = new maplibregl.Marker({ element: e, anchor: "bottom" }).setLngLat([tr.lng, tr.lat]).addTo(m);
-      this.markers.set(tr.id, { m: mk, el: e, lng: tr.lng });
+      this.markers.set(tr.id, { m: mk, el: e, lng: tr.lng, lift: 0 });
     }
   }
 
-  /** Move the truck icons; a truck faces the way it drives (the icon is drawn facing right). */
+  /** Move the truck icons (every frame); a truck faces the way it drives (the icon is drawn facing right). */
   private moveMarkers(s: Simulation) {
+    // Trucks near each other on screen are spread out (up, then left/right) with a stem to the real point, so no truck
+    // hides another. Zoomed out to show all buildings, 58 px is about 300 m, so trucks at near buildings touch.
+    const placed: { x0: number; x1: number; y: number }[] = [];
+    const { w: W, h: H } = this.size;
     for (const tr of s.trucks) {
       const mk = this.markers.get(tr.id);
       if (!mk) continue;
       const dx = tr.lng - mk.lng;
       if (Math.abs(dx) > 2e-6) { mk.el.dataset.dir = dx < 0 ? "left" : "right"; mk.lng = tr.lng; }
       mk.m.setLngLat([tr.lng, tr.lat]);
+      // status, ladder and label follow the truck in the same frame
+      if (mk.el.dataset.status !== tr.status) mk.el.dataset.status = tr.status;
+      const held = s.locks.has(tr.id) ? "1" : "";
+      if (mk.el.dataset.held !== held) mk.el.dataset.held = held;
+      const tb = tr.building ? s.byId.get(tr.building) : undefined;
+      const say = tr.status === "on_scene" && tb ? (tb.need >= 0.5 ? `bringing out ${Math.ceil(tb.need - 0.01)}` : "all out ✓") : "";
+      const sayEl = mk.el.lastElementChild as HTMLElement;
+      if (sayEl.textContent !== say) sayEl.textContent = say;
+      // screen box of the icon (+ its label on the side it faces)
+      const p = this.m.project([tr.lng, tr.lat]);
+      const lab = say ? 7 * say.length + 18 : 0, left = mk.el.dataset.dir === "left";
+      let off: [number, number] = [0, 0], fewest = Infinity;
+      for (const c of SPREAD) {
+        const x = p.x + c[0], y = p.y + c[1];
+        const x0 = x - 31 - (left ? lab : 0), x1 = x + 31 + (left ? 0 : lab);
+        // never spread a truck (or its label) off screen or under a panel
+        const f = lastFree;
+        if (c[0] !== 0 || c[1] !== 0) if (x0 < f.left || x1 > W - f.right || y - 36 < f.top || y > H - f.bottom) continue;
+        const n = placed.reduce((k, q) => k + (q.x0 < x1 && x0 < q.x1 && Math.abs(q.y - y) < 46 ? 1 : 0), 0);
+        if (n < fewest) { fewest = n; off = c; }
+        if (n === 0) break;
+      }
+      const x = p.x + off[0];
+      placed.push({ x0: x - 31 - (left ? lab : 0), x1: x + 31 + (left ? 0 : lab), y: p.y + off[1] });
+      const key = off[0] * 1000 + off[1];
+      if (mk.lift !== key) {
+        mk.lift = key;
+        mk.m.setOffset(off);
+        const len = Math.hypot(off[0], off[1]);
+        mk.el.style.setProperty("--stem", `${len}px`);
+        mk.el.style.setProperty("--stem-a", `${Math.atan2(-off[1], -off[0])}rad`);
+        mk.el.dataset.lifted = len ? "1" : "";
+      }
     }
   }
 
@@ -216,8 +297,6 @@ export class SimRenderer {
     for (const tr of s.trucks) {
       const mk = this.markers.get(tr.id);
       if (mk) {
-        mk.el.dataset.status = tr.status;
-        mk.el.dataset.held = s.locks.has(tr.id) ? "1" : "";
         mk.el.title = `${tr.name}: ${tr.status.replace("_", " ")}${tr.building ? " → " + s.byId.get(tr.building)?.label : ""}`;
       }
       // only a dashed line from a truck that is driving to its building (no route line, no rings)
@@ -251,6 +330,15 @@ export class SimRenderer {
   }
 }
 
+/** Where a truck icon may go when its own place is taken (px from its real point): up, then the sides, then higher. */
+const SPREAD: [number, number][] = (() => {
+  const out: [number, number][] = [];
+  for (let r = -1; r <= 6; r++) for (let c = -4; c <= 4; c++) out.push([c * 64 + (r & 1 ? 32 : 0), -r * 46]);
+  // nearest first; a place above costs less than one below (the stem then points down to the building)
+  const cost = ([x, y]: [number, number]) => Math.hypot(x, y * (y > 0 ? 2.5 : 1));
+  return out.sort((a, b) => cost(a) - cost(b));
+})();
+
 /** Fire truck, side view, facing right. The ladder (.ladder) lies on the roof; on scene it swings up and extends. */
 const TRUCK_SVG = `<svg viewBox="0 0 64 40" width="58" height="36" aria-hidden="true">
   <g class="body">
@@ -271,11 +359,21 @@ const TRUCK_SVG = `<svg viewBox="0 0 64 40" width="58" height="36" aria-hidden="
 </svg>`;
 
 export const TRUCK_CSS = `
-.truck{position:relative;width:58px;height:36px;cursor:pointer;filter:drop-shadow(0 2px 3px #000a);transition:filter .3s,opacity .3s}
+/* position must stay absolute: MapLibre places markers with absolute + transform. "relative" stacked the 8 markers in
+   page flow, so truck i was drawn i x 36 px below its real place (found 2026-11-14). */
+.maplibregl-marker.truck{position:absolute}
+.truck{width:58px;height:36px;cursor:pointer;filter:drop-shadow(0 2px 3px #000a);transition:filter .3s,opacity .3s}
 .truck svg{display:block;overflow:visible;transition:transform .25s}
 .truck[data-dir=left] svg{transform:scaleX(-1)}
 .truck .num{position:absolute;left:50%;top:17px;transform:translateX(-50%);font:800 11px/1 -apple-system,sans-serif;color:#fff;
   text-shadow:0 1px 0 #7f1d1d;pointer-events:none}
+.truck .say{position:absolute;left:100%;top:50%;margin-left:2px;transform:translateY(-50%);white-space:nowrap;
+  font:700 11px/1 -apple-system,sans-serif;color:#111;background:#c084fc;border-radius:9px;padding:3px 7px;pointer-events:none;
+  box-shadow:0 1px 4px #0008}
+.truck .say:empty{display:none}
+.truck[data-dir=left] .say{left:auto;right:100%;margin:0 2px 0 0}
+.truck[data-lifted="1"]::after{content:"";position:absolute;left:50%;top:100%;width:var(--stem);height:2px;margin-top:-1px;
+  transform-origin:0 50%;transform:rotate(var(--stem-a));background:#fff;opacity:.85;box-shadow:0 0 2px #000;pointer-events:none}
 .truck .ladder{transform-box:fill-box;transform-origin:0% 100%;transition:transform .8s cubic-bezier(.4,1.4,.6,1)}
 .truck[data-status=on_scene] .ladder{transform:translate(0,4px) rotate(-38deg) scaleX(1.55)}
 .truck[data-status=en_route] .body{animation:truck-bump .28s ease-in-out infinite alternate}
