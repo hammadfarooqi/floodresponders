@@ -16,7 +16,6 @@ export class RoadGraph {
   private len: Float32Array;   // meters
   private fire: Float32Array;  // minute the fire closes the edge (Infinity = never)
   readonly buildingNode: Record<string, number>;
-
   constructor(r: RoadsJson) {
     this.n = r.nodes.length;
     this.lng = new Float64Array(this.n);
@@ -39,8 +38,10 @@ export class RoadGraph {
 
   /** Shortest road distance (m) from `src` to every node, avoiding edges the fire has closed by `nowMin`.
    *  Writes into `dist` / `prev` (reused buffers). Stops past `maxM` meters. */
-  dijkstra(src: number | number[], nowMin: number, dist: Float64Array, prev: Int32Array, maxM = Infinity) {
+  dijkstra(src: number | number[], nowMin: number, dist: Float64Array, prev: Int32Array, maxM = Infinity,
+           stop?: (node: number) => boolean): number {
     dist.fill(Infinity); prev.fill(-1);
+    // binary heap on plain arrays (V8 keeps them packed); pop() returns the node and sets topD (no tuple per step)
     const heapN: number[] = [], heapD: number[] = [];
     const push = (node: number, d: number) => {
       let i = heapN.length; heapN.push(node); heapD.push(d);
@@ -51,8 +52,9 @@ export class RoadGraph {
       }
       heapN[i] = node; heapD[i] = d;
     };
-    const pop = (): [number, number] => {
-      const topN = heapN[0], topD = heapD[0];
+    let topD = 0;
+    const pop = (): number => {
+      const topN = heapN[0]; topD = heapD[0];
       const lastN = heapN.pop()!, lastD = heapD.pop()!;
       const size = heapN.length;
       if (size > 0) {
@@ -66,19 +68,21 @@ export class RoadGraph {
         }
         heapN[i] = lastN; heapD[i] = lastD;
       }
-      return [topN, topD];
+      return topN;
     };
     for (const s0 of typeof src === "number" ? [src] : src) { dist[s0] = 0; push(s0, 0); }
     while (heapN.length) {
-      const [u, d] = pop();
+      const u = pop(), d = topD;
       if (d > dist[u]) continue;
       if (d > maxM) break;
+      if (stop && stop(u)) return u;   // early exit: the nearest node that passes the test
       for (let k = this.start[u], e = this.start[u + 1]; k < e; k++) {
         if (this.fire[k] <= nowMin) continue;
         const v = this.to[k], nd = d + this.len[k];
         if (nd < dist[v]) { dist[v] = nd; prev[v] = u; push(v, nd); }
       }
     }
+    return -1;
   }
 
   /** Nodes touched by any street the fire closes (in the 3-hour scenario). */

@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev -p ${PORT:-3001}",
     "build": "next build",
-    "start": "next start -p ${PORT:-3001}"
+    "start": "next start -p ${PORT:-3001}",
+    "demo:build": "NEXT_DIST_DIR=.next-prod next build",
+    "demo": "NEXT_DIST_DIR=.next-prod next build && NEXT_DIST_DIR=.next-prod next start -p ${PORT:-3002}"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

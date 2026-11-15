@@ -22,10 +22,11 @@ export function style(base: keyof typeof BASES): StyleSpecification {
       dem: { type: "raster-dem", tiles: [TERRAIN], encoding: "terrarium", tileSize: 256, maxzoom: 15,
              attribution: "Terrain: Mapzen / AWS Open Data" },
       dem_shade: { type: "raster-dem", tiles: [TERRAIN], encoding: "terrarium", tileSize: 256, maxzoom: 15 },
-      buildings: { type: "geojson", data: "/api/demo/buildings_map.geojson", promoteId: "id" },
-      evac: { type: "geojson", data: "/api/demo/sunset_fire_2025_evacuation.geojson" },
-      evac_whatif: { type: "geojson", data: "/api/demo/evac_whatif.geojson" },
-      fire: { type: "geojson", data: "/api/demo/fire_cells.geojson", generateId: true },
+      // maxzoom 14: tile the 42k buildings once at z14 and over-zoom above it (default 18 multiplies tiles and memory)
+      buildings: { type: "geojson", data: "/api/demo/buildings_map.geojson", promoteId: "id", maxzoom: 14 },
+      evac: { type: "geojson", data: "/api/demo/sunset_fire_2025_evacuation.geojson", maxzoom: 13 },
+      evac_whatif: { type: "geojson", data: "/api/demo/evac_whatif.geojson", maxzoom: 13 },
+      fire: { type: "geojson", data: "/api/demo/fire_cells.geojson", generateId: true, maxzoom: 14 },
     },
     layers: [
       { id: "base", type: "raster", source: "base" },

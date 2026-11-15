@@ -5,14 +5,14 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { DEFAULT_CONFIG, Simulation, type LogEntry, type Policy } from "../../lib/sim/engine";
-import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, type Loaded } from "./simMap";
+import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, setHills, type Loaded } from "./simMap";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 
 const DURATION = 180, RUN_SECONDS = 25;
 const VIEW = { center: [-118.338, 34.094] as [number, number], zoom: 13.75, pitch: 45, bearing: 0 };
 const RUNS: Record<Policy, { n: number; title: string; sub: string }> = {
   nearest: { n: 1, title: "Old way", sub: "Each free truck goes to the nearest building that needs help. It never re-plans." },
-  ours: { n: 2, title: "Roll Call AI", sub: "Ranks buildings by people needing help × urgency, sends a truck only if it can arrive before the fire, re-matches every 5 min and after every call." },
+  ours: { n: 2, title: "Roll Call AI", sub: "Sends each truck where it helps the most people per minute: people needing help × how soon the fire arrives ÷ (drive time + time on scene). Only if the truck can arrive before the fire. Re-plans every 5 min and after every call." },
 };
 
 type Counts = Simulation["counts"];
@@ -37,6 +37,7 @@ export default function SimView() {
   const [lines, setLines] = useState<Line[]>([]);
   const [results, setResults] = useState<Partial<Record<Policy, Counts>>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
+  const [hills, setHillsUi] = useState(false);
 
   // ---------- load data + map ----------
   useEffect(() => {
@@ -46,6 +47,10 @@ export default function SimView() {
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.current = m;
     (window as unknown as { __map?: maplibregl.Map }).__map = m;
+    // debugging handles (local prototype only): current simulation and renderer, for timing in the console
+    Object.defineProperty(window, "__sim", { configurable: true, get: () => sim.current });
+    Object.defineProperty(window, "__renderer", { configurable: true, get: () => renderer.current });
+    m.once("load", () => setHills(m, false));
     loadSimLayers(m).then(d => {
       data.current = d;
       renderer.current = new SimRenderer(m, d);
@@ -85,7 +90,8 @@ export default function SimView() {
 
   useEffect(() => { if (ready) start("nearest"); }, [ready, start]);
 
-  const draw = () => { if (sim.current) renderer.current?.draw(sim.current); };
+  // force = redraw everything now (after a user action); the play loop passes false (moving layers ~20/s)
+  const draw = (force = true) => { if (sim.current) renderer.current?.draw(sim.current, [], force); };
 
   // ---------- playback ----------
   useEffect(() => {
@@ -94,6 +100,8 @@ export default function SimView() {
     const loop = (now: number) => {
       const s = sim.current;
       if (!s) return;
+      // update at most 30 times a second: the map redraws on every change, and a busy laptop cannot keep up with 120
+      if (now - last < 30) { raf = requestAnimationFrame(loop); return; }
       const dt = Math.min(0.1, (now - last) / 1000); last = now;
       clock.current = Math.max(clock.current, s.t);
       let target = Math.min(DURATION, clock.current + dt * speed * DURATION / RUN_SECONDS);
@@ -112,7 +120,7 @@ export default function SimView() {
         if (fu.length) { setLines(prev => [...prev, ...fu]); callAt.current = null; }
       }
       logSeen.current = s.log.length;
-      draw();
+      draw(s.done);
       if (now - lastUi > 100 || pause || s.done) { lastUi = now; setFrame(f => f + 1); }
       if (s.done) { setResults(r => ({ ...r, [s.policy]: s.counts })); setPlaying(false); return; }
       if (pause) { setPlaying(false); return; }
@@ -170,6 +178,8 @@ export default function SimView() {
           {[1, 2, 4].map(x => <button key={x} className={`chip ${speed === x ? "on" : ""}`} onClick={() => setSpeed(x)}>{x}×</button>)}
           <button className="chip" onClick={() => start(policy)} disabled={!ready}>restart</button>
           <button className="chip" onClick={skipToEnd} disabled={!ready || !!s?.done}>skip to end</button>
+          <button className={`chip ${hills ? "on" : ""}`} title="Real hill heights. Prettier, but slower while playing."
+            onClick={() => { const v = !hills; setHillsUi(v); if (map.current) setHills(map.current, v); }}>3D hills</button>
           <label className="chk"><input type="checkbox" checked={pauseOnCalls} onChange={e => setPauseOnCalls(e.target.checked)} /> pause on calls</label>
         </div>
         {c && (
@@ -188,9 +198,10 @@ export default function SimView() {
             <tr><td>Truck crew</td><td>brings out {cfg.assisted_people_per_min} people per minute</td></tr>
             <tr><td>Truck speed</td><td>{cfg.truck_speed_kmh} km/h on OSM streets, no traffic, one-way rules ignored; burned streets closed</td></tr>
             <tr><td>Crews pull out</td><td>{cfg.withdraw_before_fire_min} min before the fire reaches a building (both runs)</td></tr>
-            <tr><td>AI re-match</td><td>every {cfg.rematch_every_min} min and after every call; urgency = 1 / (1 + minutes left / {cfg.urgency_tau_min})</td></tr>
+            <tr><td>AI choice</td><td>pair value = people needing help × urgency ÷ (drive min + min on scene + 1); urgency = 1 / (1 + minutes until fire / {cfg.urgency_tau_min}); best pair first</td></tr>
+            <tr><td>AI re-match</td><td>every {cfg.rematch_every_min} min and after every call</td></tr>
             <tr><td>People per building</td><td>units × 2.4 × 0.95; need help = 10% (estimate, BUILDING_MODEL.md)</td></tr>
-            <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (138°); stops near Sunset Blvd at 3:00</td></tr>
+            <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (138°); the front stops at Hollywood Blvd at 3:00 (crews hold the line)</td></tr>
             <tr><td>Calls</td><td>scripted demo words; effects are simulated. {STUCK.count} stuck tenants exist in both runs; only the AI run gets the call</td></tr>
             <tr><td>Trucks</td><td>8 engines from LAFD stations south of the hills; same start in both runs</td></tr>
           </tbody></table>)}

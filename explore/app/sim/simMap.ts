@@ -19,6 +19,12 @@ interface Walker { route: Route; t0: number; kind: "able" | "need"; side: number
 interface Route { xs: Float64Array; ys: Float64Array; cum: Float64Array }   // street path to safety, cumulative meters
 export interface PendingLine { truck: string; building: string }
 
+/** 3D terrain makes every map update redraw the ground texture: 76 fps without it vs 20 fps with it while the
+ *  simulation plays (measured). The simulation pages start flat (hills still shaded) and offer a "3D hills" toggle. */
+export function setHills(m: maplibregl.Map, on: boolean) {
+  m.setTerrain(on ? { source: "dem", exaggeration: 1.4 } : null);
+}
+
 export const fmtT = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
 export const n0 = (x: number) => Math.round(x).toLocaleString("en-US");
 
@@ -70,6 +76,7 @@ export class SimRenderer {
   private escape: Int32Array;                // next road node toward safety, per node (-1 = already safe)
   private routes = new Map<number, Route>(); // per sim building idx
   private fire = { burn: 0, cool: 0, bld: 0 };
+  private lastPush = -1e9;   // wall time of the last setData on the moving layers
   onTruckClick?: (id: string) => void;
 
   constructor(private m: maplibregl.Map, private d: Loaded) {
@@ -128,7 +135,11 @@ export class SimRenderer {
     }
   }
 
-  draw(s: Simulation, pending: PendingLine[] = []) {
+  private moveMarkers(s: Simulation) {
+    for (const tr of s.trucks) this.markers.get(tr.id)?.m.setLngLat([tr.lng, tr.lat]);
+  }
+
+  draw(s: Simulation, pending: PendingLine[] = [], force = false) {
     const m = this.m, d = this.d, t = s.t;
     const p = this.fire, c = d.cells, a = d.arrivals;
     while (p.burn < c.length && c[p.burn].t <= t) { m.setFeatureState({ source: "fire", id: c[p.burn].id }, { burned: true, front: true }); p.burn++; }
@@ -141,16 +152,21 @@ export class SimRenderer {
       if (st !== this.shown[idx]) { this.shown[idx] = st; m.setFeatureState({ source: "buildings", id: b.id }, { st }); }
       // a dot appears only when people have left the building
       const ableOut = b.evacuated - b.evacuatedNeed;
-      while (ableOut - this.spawned[idx] >= ABLE_PER_DOT && this.walkers.length < 2000) {
+      while (ableOut - this.spawned[idx] >= ABLE_PER_DOT && this.walkers.length < 1200) {
         this.spawned[idx] += ABLE_PER_DOT;
         this.walkers.push({ route: this.route(s, idx), t0: t, kind: "able", side: ((idx * 7 + this.spawned[idx]) % 5) - 2 });
       }
-      while (b.evacuatedNeed - this.spawnedNeed[idx] >= NEED_PER_DOT && this.walkers.length < 2000) {
+      while (b.evacuatedNeed - this.spawnedNeed[idx] >= NEED_PER_DOT && this.walkers.length < 1200) {
         this.spawnedNeed[idx] += NEED_PER_DOT;
         this.walkers.push({ route: this.route(s, idx), t0: t, kind: "need", side: ((idx * 3 + this.spawnedNeed[idx]) % 5) - 2 });
       }
     }
     s.dirty.clear();
+    // The moving layers (walkers, routes, pairing lines) are re-sent to the map worker at most 20 times a second.
+    // Sending them every frame (~120/s) made ~100 MB of garbage every 20 s and caused long frames.
+    const now = performance.now();
+    if (now - this.lastPush < 50 && !force) { this.moveMarkers(s); return; }
+    this.lastPush = now;
     // walkers move along their street route; they fade out over 2 min once they reach a safe street
     const FADE = 2, feats: GeoJSON.Feature[] = [], keep: Walker[] = [];
     for (const w of this.walkers) {

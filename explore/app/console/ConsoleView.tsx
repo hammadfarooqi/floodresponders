@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { Simulation, mins, type Proposal, type SimBuilding, type Truck } from "../../lib/sim/engine";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
-import { COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, type Loaded } from "../sim/simMap";
+import { COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, setHills, type Loaded } from "../sim/simMap";
 
 const DURATION = 180;
 const VIEW = { center: [-118.327, 34.0965] as [number, number], zoom: 13.55, pitch: 35, bearing: 0 };
@@ -53,6 +53,7 @@ export default function ConsoleView() {
   const [cmd, setCmd] = useState("");
   const [cmdMsg, setCmdMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
+  const [hills, setHillsUi] = useState(false);
   const refresh = () => setFrame(f => f + 1);
 
   // ---------- setup ----------
@@ -63,6 +64,7 @@ export default function ConsoleView() {
     m.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
     map.current = m;
     (window as unknown as { __map?: maplibregl.Map }).__map = m;
+    m.once("load", () => setHills(m, false));
     loadSimLayers(m).then(d => {
       data.current = d;
       renderer.current = new SimRenderer(m, d);
@@ -115,7 +117,8 @@ export default function ConsoleView() {
     syncFeed(); draw(); refresh();
   };
 
-  const draw = () => { const s = sim.current; if (s) renderer.current?.draw(s, pending.current.filter(p => !p.applied)); };
+  // force = redraw everything now (after a user action); the play loop passes false (moving layers ~20/s)
+  const draw = (force = true) => { const s = sim.current; if (s) renderer.current?.draw(s, pending.current.filter(p => !p.applied), force); };
   const notifyDriver = (s: Simulation, p: Proposal) => {
     const tr = s.trucks.find(x => x.id === p.truck)!, b = s.byId.get(p.building)!;
     feed.current.push({ k: "call", t: s.t, title: `Roll Call → ${tr.name}`, lines: [
@@ -240,6 +243,8 @@ export default function ConsoleView() {
     let raf = 0, last = performance.now(), lastUi = 0;
     const loop = (now: number) => {
       const s = sim.current!;
+      // update at most 30 times a second: the map redraws on every change, and a busy laptop cannot keep up with 120
+      if (now - last < 30) { raf = requestAnimationFrame(loop); return; }
       const dt = Math.min(0.1, (now - last) / 1000); last = now;
       clock.current = Math.max(clock.current, s.t);
       const target = Math.min(DURATION, clock.current + dt * speed);
@@ -257,7 +262,7 @@ export default function ConsoleView() {
         const b = s.byId.get(p.building), tr = s.trucks.find(x => x.id === p.truck);
         if (p.applied) return (now - p.wall) / 1000 < REVIEW_SECONDS && tr?.building === p.building;
         return b && !b.burned && b.needKnown > 0.5 && tr && tr.status !== "unavailable" && tr.building !== p.building; });
-      syncFeed(); draw();
+      syncFeed(); draw(s.done);
       if (now - lastUi > 120 || s.done) { lastUi = now; refresh(); }
       if (s.done) { setPlaying(false); return; }
       raf = requestAnimationFrame(loop);
@@ -320,6 +325,8 @@ export default function ConsoleView() {
           <span className="big">{fmtT(t)}</span><span className="dim">/ 3:00</span>
           {SPEEDS.map(sp => <button key={sp.x} className={`seg ${speed === sp.x ? "on" : ""}`} onClick={() => setSpeed(sp.x)}>{sp.label}</button>)}
           <button className="seg" onClick={start} disabled={!ready}>reset</button>
+          <button className={`seg ${hills ? "on" : ""}`} title="Real hill heights. Prettier, but slower while playing."
+            onClick={() => { const v = !hills; setHillsUi(v); if (map.current) setHills(map.current, v); }}>3D hills</button>
         </div>
         <div className="mode">
           AI pairings:

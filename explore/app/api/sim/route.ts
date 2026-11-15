@@ -8,7 +8,7 @@ const DEMO_DIR = process.env.DEMO_DIR ?? path.resolve(process.cwd(), "../data/de
 // plus the LAFD stations. buildings.json is 40 MB, too big for the browser. Generated data, never committed.
 let cache: { mtime: number; body: string } | null = null;
 
-export async function GET() {
+export async function GET(req: Request) {
   const file = path.join(DEMO_DIR, "buildings.json");
   const { stat } = await import("node:fs/promises");
   const mtime = (await stat(file)).mtimeMs;
@@ -24,5 +24,8 @@ export async function GET() {
     const stations = JSON.parse(await readFile(path.join(DEMO_DIR, "stations.json"), "utf8")).stations;
     cache = { mtime, body: JSON.stringify({ buildings, stations }) };
   }
-  return new Response(cache.body, { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  const etag = `"sim-${Math.round(cache.mtime)}"`;
+  const headers = { "content-type": "application/json", "cache-control": "no-cache", etag };
+  if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+  return new Response(cache.body, { headers });
 }

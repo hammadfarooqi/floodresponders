@@ -21,6 +21,7 @@ export interface SimConfig {
   arrive_before_fire_min: number;   // AI only: do not send a truck that arrives later than this before the fire
   withdraw_before_fire_min: number; // crews leave a building this long before the fire reaches it (both runs)
   urgency_tau_min: number;          // AI urgency = 1 / (1 + minutes_left / tau)
+  match_rule: "rate" | "priority";  // AI: "rate" = people helped per minute of truck time; "priority" = most urgent first
   duration_min: number;
 }
 
@@ -33,6 +34,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   arrive_before_fire_min: 3,
   withdraw_before_fire_min: 1,
   urgency_tau_min: 30,
+  match_rule: "rate",
   duration_min: 180,
 };
 
@@ -181,8 +183,8 @@ export class Simulation {
       if (t0 >= this.nextMatch || this.needRematch) this.rematch(true);
       else if (this.needFill) this.rematch(false);
     } else if (this.needFill || Math.abs(t0 - Math.round(t0)) < 1e-6) {
-      this.needFill = false;
-      this.assignNearest();
+      const changed = this.needFill; this.needFill = false;
+      this.assignNearest(changed);
     }
     this.moveTrucks(DT);
     this.people(t0, t1);
@@ -324,22 +326,26 @@ export class Simulation {
   }
 
   // ---------- old way: nearest building that needs help, never re-plan ----------
-  private assignNearest() {
+  private idleNoWork = new Set<string>();   // idle trucks that found nothing; they search again when something changes
+  private assignNearest(changed: boolean) {
+    if (changed) this.idleNoWork.clear();
     const targeted = new Set(this.trucks.map(t => t.building).filter(Boolean) as string[]);
+    // road node -> first building (in list order) there that needs help and has no truck
+    const atNode = new Map<number, SimBuilding>();
+    for (const b of this.buildings)
+      if (!b.burned && b.needKnown > 0.5 && !targeted.has(b.id) && b.node >= 0 && !atNode.has(b.node)) atNode.set(b.node, b);
     this.trucks.forEach((tr, ti) => {
-      if (tr.status !== "idle") return;
+      if (tr.status !== "idle" || this.idleNoWork.has(tr.id)) return;
       const src = this.source(tr);
-      this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], 40000);
-      let best: SimBuilding | null = null, bestD = Infinity;
-      for (const b of this.buildings) {
-        if (b.burned || b.needKnown <= 0.5 || targeted.has(b.id) || b.node < 0) continue;
-        const d = this.dist[ti][b.node];
-        if (d < bestD) { bestD = d; best = b; }
-      }
-      if (best) {
-        targeted.add(best.id);
-        this.dispatch(tr, ti, best, src.offset, "Nearest building that needs help.");
-      }
+      // the search stops at the first road node with a building that needs help: that is the nearest one
+      const hit = this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], 40000, n => atNode.has(n));
+      const best = hit >= 0 ? atNode.get(hit)! : null;
+      if (!best) { this.idleNoWork.add(tr.id); return; }
+      targeted.add(best.id);
+      atNode.delete(best.node);
+      for (const b of this.buildings)   // another building at the same node may still need a truck
+        if (b.node === best.node && b !== best && !b.burned && b.needKnown > 0.5 && !targeted.has(b.id)) { atNode.set(b.node, b); break; }
+      this.dispatch(tr, ti, best, src.offset, "Nearest building that needs help.");
     });
   }
 
@@ -358,7 +364,7 @@ export class Simulation {
     if (!free.length) return;
     const srcs = free.map(({ tr, ti }) => {
       const s = this.source(tr);
-      this.g.dijkstra(s.node, this.t, this.dist[ti], this.prev[ti], this.speedMpm * 60);
+      this.g.dijkstra(s.node, this.t, this.dist[ti], this.prev[ti], this.speedMpm * 20);  // search up to 20 min of driving: in our runs this gives the same pairings as no limit, and it is cheaper
       return s;
     });
     const covered = new Set<string>();
@@ -369,21 +375,45 @@ export class Simulation {
       .sort((a, b) => this.priority(b) - this.priority(a) || (a.id < b.id ? -1 : 1));
     const open = new Set(free.map((_, i) => i));
     const proposals: Proposal[] = [];
-    for (const b of cands) {
-      if (!open.size) break;
-      let bestI = -1, bestEta = Infinity;
-      for (const i of open) {
-        const { tr, ti } = free[i];
-        if ((this.vetoes.get(`${tr.id}|${b.id}`) ?? -1) > this.t) continue;
-        let eta = (this.dist[ti][b.node] + srcs[i].offset) / this.speedMpm;
-        if (tr.building === b.id) eta -= 3; // keep the current pairing unless another truck is >3 min faster (less churn)
-        if (eta < bestEta) { bestEta = eta; bestI = i; }
-      }
-      if (bestI < 0 || this.t + bestEta > b.fire - this.cfg.arrive_before_fire_min) continue; // nobody can arrive in time
-      open.delete(bestI);
-      const { tr } = free[bestI];
-      proposals.push({ truck: tr.id, building: b.id, eta_min: Math.max(0, bestEta),
+    const etaOf = (i: number, b: SimBuilding) => {
+      const { tr, ti } = free[i];
+      if ((this.vetoes.get(`${tr.id}|${b.id}`) ?? -1) > this.t) return Infinity;
+      let eta = (this.dist[ti][b.node] + srcs[i].offset) / this.speedMpm;
+      if (tr.building === b.id) eta -= 3; // keep the current pairing unless another option is clearly better (less churn)
+      return eta;
+    };
+    const propose = (i: number, b: SimBuilding, eta: number) => {
+      open.delete(i);
+      const { tr } = free[i];
+      proposals.push({ truck: tr.id, building: b.id, eta_min: Math.max(0, eta),
         reason: `${Math.round(b.needKnown)} need help.`, prev: tr.building });
+    };
+    const inTime = (b: SimBuilding, eta: number) => this.t + eta <= b.fire - this.cfg.arrive_before_fire_min;
+    if (this.cfg.match_rule === "rate") {
+      // Pick the truck-building pair that helps the most people per minute of truck time, then the next, and so on.
+      // value = people needing help x urgency / (drive time + time on scene + 1)
+      const left = new Set(cands);
+      while (open.size && left.size) {
+        let best: { i: number; b: SimBuilding; eta: number; v: number } | null = null;
+        for (const i of open) for (const b of left) {
+          const eta = etaOf(i, b);
+          if (!inTime(b, eta)) continue;
+          const v = this.priority(b) / (Math.max(0, eta) + b.needKnown / this.cfg.assisted_people_per_min + 1);
+          if (!best || v > best.v || (v === best.v && b.id < best.b.id)) best = { i, b, eta, v };
+        }
+        if (!best) break;
+        left.delete(best.b);
+        propose(best.i, best.b, best.eta);
+      }
+    } else {
+      // "priority": most urgent building first, nearest truck that can arrive before the fire
+      for (const b of cands) {
+        if (!open.size) break;
+        let bestI = -1, bestEta = Infinity;
+        for (const i of open) { const eta = etaOf(i, b); if (eta < bestEta) { bestEta = eta; bestI = i; } }
+        if (bestI < 0 || !inTime(b, bestEta)) continue; // nobody can arrive in time
+        propose(bestI, b, bestEta);
+      }
     }
     const final = this.approve ? this.approve(proposals) : proposals;
     const chosen = new Set(final.map(p => p.truck));

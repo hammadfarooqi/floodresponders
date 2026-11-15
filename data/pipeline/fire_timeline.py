@@ -34,6 +34,8 @@ DEMO, BOUNDS = DATA / "demo", DATA / "boundaries"
 # ---- assumptions (shown in the UI) ----
 ORIGIN = (-118.3510, 34.1128)        # Runyon Canyon, Sunset Fire start (8 Jan 2025), approximate
 TARGET = (-118.3350, 34.0982)        # Sunset Blvd, middle of the Hollywood area: the front stops here
+if os.environ.get("FIRE_TARGET"):     # e.g. FIRE_TARGET="-118.3350,34.1016" (Hollywood Blvd): a smaller, slower fire
+    TARGET = tuple(float(v) for v in os.environ["FIRE_TARGET"].split(","))
 WIND_TO_DEG = None                    # None = blow from the origin toward the target
 LB = 1.6                               # ellipse length-to-breadth ratio
 URBAN_FACTOR = 0.25                   # built-up cells burn at this share of the brush rate ...

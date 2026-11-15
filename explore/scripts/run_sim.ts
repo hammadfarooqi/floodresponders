@@ -10,7 +10,7 @@ const bj = JSON.parse(readFileSync(D + "buildings.json", "utf8"));
 const buildings = (Array.isArray(bj) ? bj : bj.buildings).filter((b: any) => b.fire_arrival_min !== null);
 const stations = JSON.parse(readFileSync(D + "stations.json", "utf8")).stations;
 const cfg: Partial<SimConfig> = {};
-for (const a of process.argv.slice(2)) { const [k, v] = a.split("="); (cfg as any)[k] = Number(v); }
+for (const a of process.argv.slice(2)) { const [k, v] = a.split("="); (cfg as any)[k] = isNaN(Number(v)) ? v : Number(v); }
 const g = new RoadGraph(roads);
 for (const policy of ["nearest", "ours"] as const) {
   const t0 = performance.now();
@@ -22,8 +22,9 @@ for (const policy of ["nearest", "ours"] as const) {
     if (process.env.SHOW) for (const l of [...a, ...b]) console.log(`  [${l.t.toFixed(1)}] ${l.speaker}${l.to ? " → " + l.to : ""}: ${l.text}`);
   }
   s.advanceTo(180);
-  const sb = s.byId.get(STUCK.building_id)!;
-  console.log(`  stuck building: trapped ${sb.trapped.toFixed(2)} of which needed help ${sb.trappedNeed.toFixed(2)}`);
+  const sb = s.byId.get(STUCK.building_id);
+  if (!sb) { console.log("  stuck building not reached by this fire"); }
+  else console.log(`  stuck building: trapped ${sb.trapped.toFixed(2)} of which needed help ${sb.trappedNeed.toFixed(2)}`);
   const c = s.counts;
   const kinds: Record<string, number> = {};
   for (const l of s.log) kinds[l.kind] = (kinds[l.kind] ?? 0) + 1;
