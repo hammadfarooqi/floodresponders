@@ -21,7 +21,9 @@ export interface SimConfig {
   arrive_before_fire_min: number;   // AI only: do not send a truck that arrives later than this before the fire
   withdraw_before_fire_min: number; // crews leave a building this long before the fire reaches it (both runs)
   urgency_tau_min: number;          // AI urgency = 1 / (1 + minutes_left / tau)
-  match_rule: "rate" | "priority";  // AI: "rate" = people helped per minute of truck time; "priority" = most urgent first
+  match_rule: "rate" | "fleet" | "priority";  // AI: "rate" = people helped per minute of truck time (greedy);
+                                              // "fleet" = whole-fleet assignment by people a crew can help (CONTRACTS phase 4, #80);
+                                              // "priority" = most urgent first
   duration_min: number;
 }
 
@@ -81,7 +83,10 @@ export interface LogEntry {
 
 export type AgentEvent =
   | { type: "driver_declines"; truck_id: string; reason: string; out_min: number }
-  | { type: "tenant_stuck"; building_id: string; count: number; note: string };
+  | { type: "tenant_stuck"; building_id: string; count: number; note: string }
+  // people_remaining = people who still need help, as reported. 0 removes the building from the queue.
+  // It changes what dispatch believes (needKnown), not the simulated people, like tenant_stuck.
+  | { type: "building_cleared"; building_id: string; people_remaining: number; note: string };
 
 export interface SimData { roads: RoadsJson; buildings: DemoBuildingLite[]; stations: StationLite[] }
 
@@ -338,7 +343,7 @@ export class Simulation {
       if (tr.status !== "idle" || this.idleNoWork.has(tr.id)) return;
       const src = this.source(tr);
       // the search stops at the first road node with a building that needs help: that is the nearest one
-      const hit = this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], 40000, n => atNode.has(n));
+      const hit = this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], 40000, this.speedMpm, src.offset, n => atNode.has(n));
       const best = hit >= 0 ? atNode.get(hit)! : null;
       if (!best) { this.idleNoWork.add(tr.id); return; }
       targeted.add(best.id);
@@ -364,7 +369,7 @@ export class Simulation {
     if (!free.length) return;
     const srcs = free.map(({ tr, ti }) => {
       const s = this.source(tr);
-      this.g.dijkstra(s.node, this.t, this.dist[ti], this.prev[ti], this.speedMpm * 20);  // search up to 20 min of driving: in our runs this gives the same pairings as no limit, and it is cheaper
+      this.g.dijkstra(s.node, this.t, this.dist[ti], this.prev[ti], this.speedMpm * 20, this.speedMpm, s.offset);  // search up to 20 min of driving: in our runs this gives the same pairings as no limit, and it is cheaper
       return s;
     });
     const covered = new Set<string>();
@@ -375,13 +380,13 @@ export class Simulation {
       .sort((a, b) => this.priority(b) - this.priority(a) || (a.id < b.id ? -1 : 1));
     const open = new Set(free.map((_, i) => i));
     const proposals: Proposal[] = [];
+    // raw road ETA (minutes); Infinity if vetoed or unreachable. The keep bonus is applied only AFTER the deadline check.
     const etaOf = (i: number, b: SimBuilding) => {
       const { tr, ti } = free[i];
       if ((this.vetoes.get(`${tr.id}|${b.id}`) ?? -1) > this.t) return Infinity;
-      let eta = (this.dist[ti][b.node] + srcs[i].offset) / this.speedMpm;
-      if (tr.building === b.id) eta -= 3; // keep the current pairing unless another option is clearly better (less churn)
-      return eta;
+      return (this.dist[ti][b.node] + srcs[i].offset) / this.speedMpm;
     };
+    const keep = (i: number, b: SimBuilding) => (free[i].tr.building === b.id ? 3 : 0); // minutes of preference, less churn
     const propose = (i: number, b: SimBuilding, eta: number) => {
       open.delete(i);
       const { tr } = free[i];
@@ -389,7 +394,9 @@ export class Simulation {
         reason: `${Math.round(b.needKnown)} need help.`, prev: tr.building });
     };
     const inTime = (b: SimBuilding, eta: number) => this.t + eta <= b.fire - this.cfg.arrive_before_fire_min;
-    if (this.cfg.match_rule === "rate") {
+    if (this.cfg.match_rule === "fleet") {
+      this.fleetMatch(free, srcs, full, proposals, open);
+    } else if (this.cfg.match_rule === "rate") {
       // Pick the truck-building pair that helps the most people per minute of truck time, then the next, and so on.
       // value = people needing help x urgency / (drive time + time on scene + 1)
       const left = new Set(cands);
@@ -398,7 +405,7 @@ export class Simulation {
         for (const i of open) for (const b of left) {
           const eta = etaOf(i, b);
           if (!inTime(b, eta)) continue;
-          const v = this.priority(b) / (Math.max(0, eta) + b.needKnown / this.cfg.assisted_people_per_min + 1);
+          const v = this.priority(b) / (Math.max(0, eta - keep(i, b)) + b.needKnown / this.cfg.assisted_people_per_min + 1);
           if (!best || v > best.v || (v === best.v && b.id < best.b.id)) best = { i, b, eta, v };
         }
         if (!best) break;
@@ -410,8 +417,8 @@ export class Simulation {
       for (const b of cands) {
         if (!open.size) break;
         let bestI = -1, bestEta = Infinity;
-        for (const i of open) { const eta = etaOf(i, b); if (eta < bestEta) { bestEta = eta; bestI = i; } }
-        if (bestI < 0 || !inTime(b, bestEta)) continue; // nobody can arrive in time
+        for (const i of open) { const eta = etaOf(i, b); if (inTime(b, eta) && eta - keep(i, b) < bestEta - (bestI >= 0 ? keep(bestI, b) : 0)) { bestEta = eta; bestI = i; } }
+        if (bestI < 0) continue; // nobody can arrive in time
         propose(bestI, b, bestEta);
       }
     }
@@ -430,9 +437,66 @@ export class Simulation {
     for (const { tr } of free) if (tr.status === "en_route" && !chosen.has(tr.id)) {
       const b = this.byId.get(tr.building!)!;
       if (b.burned || b.needKnown <= 0.5 || this.t > b.fire - this.cfg.arrive_before_fire_min) {
-        this.say({ kind: "unassign", truck: tr.id, building: b.id, text: `${tr.name} called off ${b.label}: cannot arrive before the fire.` });
+        const why = b.needKnown <= 0.5 && !b.burned ? "nobody left who needs help" : "cannot arrive before the fire";
+        this.say({ kind: "unassign", truck: tr.id, building: b.id, text: `${tr.name} called off ${b.label}: ${why}.` });
         this.free(tr);
       }
+    }
+  }
+
+  /** Rule "fleet" (CONTRACTS phase 4, Rasul's PR #80): whole-fleet assignment. A column is one crew slot at a building
+   *  (slot 0 = first crew there, 1 = second, ...). Value of a truck in a slot = people that crew can still help between
+   *  arrival and withdrawal, minus what earlier crews there help. Checks: a route that avoids burning streets, the real
+   *  ETA against the fire deadline, then the keep-assignment bonus. Idle trucks then check buildings nobody can reach. */
+  private fleetMatch(free: { tr: Truck; ti: number }[], srcs: { node: number; offset: number }[], full: boolean,
+                     proposals: Proposal[], open: Set<number>) {
+    const crews = new Map<string, number>();
+    for (const tr of this.trucks)
+      if ((tr.status === "on_scene" || this.locks.has(tr.id) || (!full && tr.status === "en_route")) && tr.building)
+        crews.set(tr.building, (crews.get(tr.building) ?? 0) + 1);
+    const cands = this.buildings.filter(b => !b.burned && b.needKnown > 0.5 && b.node >= 0);
+    const eta = (i: number, b: SimBuilding) => (this.dist[free[i].ti][b.node] + srcs[i].offset) / this.speedMpm;
+    const rate = this.cfg.assisted_people_per_min;
+    const cols: { b: SimBuilding; slot: number }[] = [];
+    const val: number[][] = free.map(() => []);
+    for (const b of cands) {
+      const have = crews.get(b.id) ?? 0;
+      for (let slot = have; slot < have + free.length; slot++) {
+        const row = free.map(({ tr }, i) => {
+          if ((this.vetoes.get(`${tr.id}|${b.id}`) ?? -1) > this.t) return 0;
+          const e = eta(i, b);
+          if (!Number.isFinite(e) || this.t + e > b.fire - this.cfg.arrive_before_fire_min) return 0;
+          const cap = rate * Math.max(0, b.fire - this.cfg.withdraw_before_fire_min - this.t - e);
+          const people = Math.min(cap, Math.max(0, b.needKnown - slot * cap));
+          if (people < 0.5) return 0;
+          const keepBonus = tr.building === b.id ? rate * 3 : 0;
+          return people + keepBonus + 1e-3 * this.priority(b);   // priority only breaks ties
+        });
+        if (row.every(v => v === 0)) break;
+        cols.push({ b, slot });
+        row.forEach((v, i) => val[i].push(v));
+      }
+    }
+    const pick = assignMax(val, cols.length);
+    const targeted = new Set(crews.keys());
+    pick.forEach((c, i) => {
+      if (c < 0 || val[i][c] <= 0) return;
+      const { b, slot } = cols[c];
+      const { tr } = free[i];
+      targeted.add(b.id); open.delete(i);
+      proposals.push({ truck: tr.id, building: b.id, eta_min: Math.max(0, eta(i, b)), prev: tr.building,
+        reason: `${Math.round(b.needKnown)} need help${slot > 0 ? ` (crew ${slot + 1} there)` : ""}.` });
+    });
+    const late = cands.filter(b => !targeted.has(b.id))
+      .sort((a, b) => this.priority(b) - this.priority(a) || (a.id < b.id ? -1 : 1));
+    for (const i of [...open]) {
+      const { tr } = free[i];
+      const b = late.find(x => !targeted.has(x.id) && Number.isFinite(eta(i, x))
+        && (this.vetoes.get(`${tr.id}|${x.id}`) ?? -1) <= this.t);
+      if (!b) continue;
+      targeted.add(b.id); open.delete(i);
+      proposals.push({ truck: tr.id, building: b.id, eta_min: Math.max(0, eta(i, b)), prev: tr.building,
+        reason: `Check, not a rescue: cannot arrive before the fire; ${Math.round(b.needKnown)} may be inside.` });
     }
   }
 
@@ -448,7 +512,7 @@ export class Simulation {
     }
     if (tr.building === b.id) return true;
     const src = this.source(tr);
-    this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], Infinity);
+    this.g.dijkstra(src.node, this.t, this.dist[ti], this.prev[ti], Infinity, this.speedMpm, src.offset);
     if (!Number.isFinite(this.dist[ti][b.node])) return false;
     this.dispatch(tr, ti, b, src.offset, p.reason);
     return true;
@@ -485,6 +549,10 @@ export class Simulation {
       tr.status = "unavailable"; tr.unavailable_until = this.t + ev.out_min;
       tr.building = null; tr.eta_min = null; tr.path = []; tr.cum = [];
       tr.startLng = tr.lng; tr.startLat = tr.lat;
+    } else if (ev.type === "building_cleared") {
+      const b = this.byId.get(ev.building_id);
+      if (!b || b.burned) return;
+      b.needKnown = Math.min(b.need, Math.max(0, ev.people_remaining));
     } else {
       const b = this.byId.get(ev.building_id);
       if (!b || b.burned) return;
@@ -497,3 +565,32 @@ export class Simulation {
 }
 
 export interface Proposal { truck: string; building: string; eta_min: number; reason: string; prev: string | null }
+
+/** Rectangular assignment that maximizes total value (Hungarian method, O(rows^2 x cols)). From PR #80 (Rasul).
+ *  `val[r][c]` >= 0; returns the column for each row, or -1. A row may stay unassigned (value 0). */
+export function assignMax(val: number[][], m: number): number[] {
+  const n = val.length;
+  const out = new Array<number>(n).fill(-1);
+  if (!n || !m) return out;
+  const M = m + n;                                   // n extra "idle" columns with value 0
+  const cost = (r: number, c: number) => (c < m ? -val[r][c] : 0);
+  const u = new Float64Array(n + 1), v = new Float64Array(M + 1);
+  const p = new Int32Array(M + 1), way = new Int32Array(M + 1);
+  for (let i = 1; i <= n; i++) {
+    p[0] = i; let j0 = 0;
+    const minv = new Float64Array(M + 1).fill(Infinity), used = new Uint8Array(M + 1);
+    do {
+      used[j0] = 1; const i0 = p[j0]; let delta = Infinity, j1 = 0;
+      for (let j = 1; j <= M; j++) if (!used[j]) {
+        const cur = cost(i0 - 1, j - 1) - u[i0] - v[j];
+        if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+        if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+      }
+      for (let j = 0; j <= M; j++) if (used[j]) { u[p[j]] += delta; v[j] -= delta; } else minv[j] -= delta;
+      j0 = j1;
+    } while (p[j0] !== 0);
+    do { const j1 = way[j0]; p[j0] = p[j1]; j0 = j1; } while (j0);
+  }
+  for (let j = 1; j <= M; j++) if (p[j] && j <= m) out[p[j] - 1] = j - 1;
+  return out;
+}
