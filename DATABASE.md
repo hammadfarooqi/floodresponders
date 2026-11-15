@@ -23,7 +23,8 @@ Project `Responder0`, Postgres 17 with PostGIS. Area: the City of Los Angeles "H
 Also: view `buildings_geojson` (all `buildings` columns plus `footprint_geojson`), and function
 `buildings_near(p_lat, p_lng, radius_m)`.
 
-362 `buildings` rows have CoStar data (`costar_id` is not null). The other 39,884 are Vexcel-only.
+362 `buildings` rows have CoStar data (`costar_id` is not null). 40,209 rows stand on a County Assessor lot
+(`assessor_ain` is not null): the Assessor is the public tax record of Los Angeles County, one record for each lot.
 
 ## Column reference
 
@@ -66,24 +67,39 @@ Also: view `buildings_geojson` (all `buildings` columns plus `footprint_geojson`
 
 | Column | Type | Meaning | Filled |
 |---|---|---|---|
-| `building_type` | text | Our one vocabulary: `single_family`, `multi_family`, `office`, `retail`, `hotel`, `commercial`, `industrial`, `institutional`, `accessory` (shed, garage), `land` | 40,124 |
-| `building_type_source` | text | Where `building_type` came from. `vexcel` 39,762, `costar` 362 | 40,124 |
+| `building_type` | text | Our one vocabulary: `single_family`, `multi_family`, `office`, `retail`, `hotel`, `commercial`, `industrial`, `institutional`, `accessory` (shed, garage), `land` | 40,223 |
+| `building_type_source` | text | Where `building_type` came from. `assessor` 37,465, `vexcel` 2,396, `costar` 362 | 40,223 |
 | `height_m` | number | Best height in meters | 36,890 |
 | `height_source` | text | `costar` (measured, 8 rows), `estimated` (CoStar floors x 3.3 m, 342), `vexcel` (36,540) | 36,890 |
 | `floors` | whole number | Floors above ground. Highest: 26 | 34,640 |
 | `floors_source` | text | `costar` (350) or `estimated` (Vexcel height / 3.3 m, 34,290) | 34,640 |
-| `units` | whole number | Homes or apartments in this structure | 31,780 |
-| `units_source` | text | `costar` (307, the structure's share of the property total) or `estimated` (31,473) | 31,780 |
-| `est_occupants` | whole number | People who live here: `units` x 2.4. The sum over all rows is 243,203 | 31,774 |
-| `occupants_source` | text | Always `estimated` when filled | 31,774 |
-| `confidence` | 0 to 1 | How much of the row comes from good sources. 0.45 is a normal Vexcel-only home (29,097 rows). 0.65 or more means CoStar data | 40,246 |
+| `units` | whole number | Homes or apartments in this structure. 0 means the lot has fewer homes than structures and this one got none (problem 38) | 34,400 |
+| `units_source` | text | `assessor` (33,524) or `costar` (329): the structure's share of the lot or property total. `estimated` (547) | 34,400 |
+| `est_occupants` | whole number | People who live here: `units` x 2.4. The sum over all rows is 270,220 | 34,394 |
+| `occupants_source` | text | Always `estimated` when filled | 34,394 |
+| `year_built` | whole number | Year construction finished. CoStar, else the Assessor (the oldest building on the lot). 2008 or later on 1,575 rows. The lowest value is 1822, which is probably an error on the tax roll | 38,529 |
+| `year_built_source` | text | `assessor` (38,169) or `costar` (360) | 38,529 |
+| `confidence` | 0 to 1 | How much of the row comes from good sources. 0.62 is a normal structure with Assessor data (31,167 rows). 0.65 or more means CoStar data | 40,246 |
+
+**County Assessor** (the lot, or lots, under the center of the structure; all null on the 37 rows with no lot)
+
+These are values of the whole lot. Every structure on the lot carries the same values, so do not add them up
+across structures (problem 38).
+
+| Column | Type | Meaning | Filled |
+|---|---|---|---|
+| `assessor_ain` | text | Lot number, 10 digits (the "AIN" or "APN" of other county data). When the structure is on stacked condominium lots: the one with the most homes | 40,209 |
+| `assessor_use_type` | text | `Residential` (36,114), `Commercial`, `Government`, `Institutional`, `Industrial`, `Recreational`, `Miscellaneous` | 40,041 |
+| `assessor_use_description` | text | The finer use, for example `Single`, `Five or more apartments`, `Store Combination`, `Hotel & Motels`, `Schools (Private)`, `Hospitals`, `Homes For Aged & Others` | 40,041 |
+| `assessor_units` | whole number | Homes on the lot. Null when the tax roll has 0, and on lots that are not housing (problem 39) | 35,817 |
+| `assessor_bedrooms` | whole number | Bedrooms on the lot. 99 is probably a placeholder (problem 37) | 35,527 |
+| `assessor_year_built` | whole number | Year of the oldest building on the lot | 38,491 |
 
 **Copied from CoStar** (null on every Vexcel-only row)
 
 | Column | Type | Meaning | Filled |
 |---|---|---|---|
 | `construction_material` | text | What the structure is built of: `masonry`, `wood_frame`, `reinforced_concrete`, `steel`, `metal` | 186 |
-| `year_built` | whole number | Year construction finished. 1913 to 2026 | 360 |
 | `is_walkup` | true/false | True: stairs only, no elevator | 207 |
 | `passenger_elevators` | whole number | Count of passenger elevators. 0 means CoStar says there are none | 87 |
 | `has_sprinklers` | true/false | Fire sprinkler system | 41 |
@@ -100,9 +116,9 @@ Also: view `buildings_geojson` (all `buildings` columns plus `footprint_geojson`
 
 | Column | Type | Meaning | Filled |
 |---|---|---|---|
-| `risk_score` | number | `people_at_risk` x `structure_factor`. Higher = send help first, when a fire threatens the building. Building data only: no fire position and no distance. 0 for sheds and garages. Null when the people inside are not known (commercial, office, retail, industrial). Highest: 186.9 | 38,841 |
-| `people_at_risk` | number | Estimated people who cannot leave without help. A one-unit home is 0.228. The sum over all rows is about 34,300 | 38,841 |
-| `structure_factor` | 0.5 to 2.0 | How likely the structure is to burn, on a relative scale. 1.0 is a structure with no trees near it, no close neighbors and no known protection. Values here run from 0.70 to 1.81, median 1.37 | 40,246 |
+| `risk_score` | number | `people_at_risk` x `structure_factor`. Higher = send help first, when a fire threatens the building. Building data only: no fire position and no distance. 0 for sheds and garages and for structures with 0 units. Null when the people inside are not known (problem 30). Highest: 194.2 | 36,712 |
+| `people_at_risk` | number | Estimated people who cannot leave without help. A one-unit home is 0.228. The sum over all rows is about 26,400 | 36,712 |
+| `structure_factor` | 0.5 to 2.0 | How likely the structure is to burn, on a relative scale. 1.0 is a structure with no trees near it, no close neighbors and no known protection. Values here run from 0.70 to 1.81, median 1.36 | 40,246 |
 
 ### `costar_properties` (300 rows)
 
@@ -123,7 +139,7 @@ CoStar's own values for a whole property, before we split anything across struct
 | `height_m` | number | Measured height, converted from feet. Rare | 7 |
 | `year_built` | whole number | Year construction finished | 298 |
 | `construction_material` | text | See `buildings.construction_material`. Null when CoStar says "unknown" | 160 |
-| `total_units` | whole number | Apartments in the whole property (hotel rooms for a hotel, 1 for a single home). Highest: 597. Sum: 12,405 | 258 |
+| `total_units` | whole number | Apartments in the whole property: the sum of CoStar's floor plans, else the count on the apartment listing (hotel rooms for a hotel, 1 for a single home). Not CoStar's `totalNumUnits` (problem 36). Highest: 735. Sum: 16,100 | 275 |
 | `floor_area_sqft` | number | Total floor area of the building in square feet (homes: living area) | 299 |
 | `is_walkup` | true/false | 23 true, 142 false | 165 |
 | `passenger_elevators` | whole number | Highest: 6 | 81 |
@@ -179,6 +195,8 @@ python3 data/db/load_supabase.py --apply-schema     # run schema.sql first, then
 - Needs the CoStar kit at `data/costar-kit/` (or `--costar-kit <path>`) and the root `.env`.
 - The first run calls Vexcel (129 calls, about 4 minutes) and caches the answers in `data/cache/vexcel_hollywood/`.
   Later runs do not call Vexcel. Delete that folder to fetch again.
+- The first run also downloads the County Assessor lots (public, no key, 36 calls, about 1 minute) into
+  `data/cache/assessor_hollywood/` (or `--assessor-cache <folder>`). Delete that folder to fetch again.
 - The upload is an upsert. Row ids are made from the parcel and footprint, so a second run updates the same rows.
 - `--apply-schema` also needs `SUPABASE_PROJECT_REF` and `SUPABASE_ACCESS_TOKEN`. Or paste `schema.sql` into the
   Supabase SQL editor.
@@ -187,18 +205,23 @@ python3 data/db/load_supabase.py --apply-schema     # run schema.sql first, then
 
 ## How each resolved value is chosen
 
-`buildings` keeps the measured Vexcel values (`vexcel_height_m`, `vexcel_building_type`, ...) and a second set of
-"resolved" columns that the app should use. Each resolved column has a `*_source` column:
-`costar`, `vexcel`, `estimated`, `assessor` (not used yet) or null.
+`buildings` keeps the measured Vexcel values (`vexcel_height_m`, `vexcel_building_type`, ...), the Assessor values
+of the lot (`assessor_*`), and a set of "resolved" columns that the app should use. Each resolved column has a
+`*_source` column: `costar`, `assessor`, `vexcel`, `estimated` or null.
+
+Order of trust: CoStar, then the Assessor, then Vexcel, then our own estimate.
 
 | Column | Rule, first match wins |
 |---|---|
 | `height_m` | CoStar measured height; else CoStar floors x 3.3 m (`estimated`); else Vexcel height if not suspect; else null |
 | `floors` | CoStar floors; else Vexcel height / 3.3, rounded, at least 1 (`estimated`); else null |
-| `building_type` | CoStar property type; else Vexcel's type |
-| `units` | CoStar units, split across the parcel's structures; else 1 for `single_family`; else footprint x floors / 85 m2 for `multi_family`; else null |
+| `building_type` | CoStar property type; else the Assessor use of the lot (table below); else Vexcel's type. A shed or garage keeps Vexcel's type |
+| `units` | CoStar units, split across the parcel's structures; else the homes of the Assessor lot, split across its structures; else 1 for `single_family`; else footprint x floors / 85 m2 for `multi_family`; else null |
 | `est_occupants` | `units` x 2.4, always `estimated`; null when `units` is null |
+| `year_built` | CoStar; else the Assessor |
 | `confidence` | Mean weight of the sources of `building_type`, `height_m`, `floors`, `units` |
+
+The Assessor has no height and no floor count, so `height_m` and `floors` still come from Vexcel for most rows.
 
 Confidence weights: `costar` 1.0, `assessor` 0.8, `vexcel` 0.6, `estimated` 0.3, null 0.
 
@@ -209,6 +232,29 @@ per unit, the 3 m "suspect" limit, and the confidence weights. They are constant
 **CoStar matching:** a CoStar property goes to the Vexcel parcel that contains its point. Its values go to every
 structure on that parcel that is not a shed or garage. Its units are split by footprint area x height, and the
 parts add up to the CoStar total. `shares_costar_property` is true when 2 or more structures got the values.
+
+**CoStar unit count:** the sum of the property's floor plans (`models[].numUnits`); else the unit count of its
+apartment listing; else hotel rooms. CoStar's `totalNumUnits` is not used (problem 36).
+
+**Assessor matching:** an Assessor lot goes to every structure whose center is inside it. The units of a
+condominium are separate lots with one shared outline, so a structure can be on many lots: their homes and
+bedrooms are added up. The homes of the lot that CoStar did not already count are split, by footprint area x
+height, across its structures that have no CoStar unit count and are not a shed or garage. The parts add up to
+the lot total. A structure can get 0 (problem 38).
+
+**Assessor unit count:** the sum of the 5 building slots of the tax record, when the lot is `Residential` or its
+description is `Store Combination` (shops with apartments) or `Homes For Aged & Others`. On other lots the count
+also covers shops and suites, so we do not use it (problem 39). A slot value of 999 is a placeholder and is left
+out (problem 37). A total of 0 means "not known": the row falls back to the estimate.
+
+**Assessor use to our type:** 2 or more homes on the lot: `multi_family`. `Residential`: `single_family` when the
+description is `Single`, else `multi_family`. `Hotel & Motels`: `hotel`. `Commercial` and `Recreational`:
+`commercial`. `Industrial`: `industrial`. `Institutional` and `Government`: `institutional`. Other or blank: no
+type from the Assessor.
+
+**How good the Assessor unit count is:** against the CoStar floor plans of 239 apartment properties here, it is
+exactly equal on 180 and within 10% on 209. Our outline estimate is within 10% on 17. CoStar's `totalNumUnits`
+is within 10% on 32.
 
 ## How the risk score is computed
 
@@ -232,9 +278,10 @@ People:
 | Need rate in senior housing | 0.5 (no row here is senior housing) |
 | 3 or more floors, more than 1 unit, and `is_walkup` is true or `passenger_elevators` is 0 | need rate x 1.5 |
 | 3 or 4 floors, more than 1 unit, and neither column is known | need rate x 1.07 |
-| `units` is `estimated` | at most 200 units are counted (problem 26) |
+| `units` is `estimated` | at most 200 units are counted (problem 26). `assessor` and `costar` counts are not capped |
 | `units` is null, type `multi_family` | outline x floors / 85 m2, at least 2 units; 2 floors when `floors` is null |
-| `units` is null, type `institutional` or null | one home when outline x floors is 400 m2 or less; else as `multi_family` |
+| `units` is null, type is null, or `institutional` from Vexcel (a guess from a photo) | one home when outline x floors is 400 m2 or less; else as `multi_family` |
+| `units` is null, type `institutional` from the Assessor or CoStar (a school, a church, a government building) | people not known: `people_at_risk` and `risk_score` are null |
 | `units` is null, type `commercial`, `office`, `retail`, `industrial`, `hotel`, `land` | people not known: `people_at_risk` and `risk_score` are null |
 | `is_accessory` | 0 |
 
@@ -289,15 +336,17 @@ section where they fit. That is why the numbers are not in order.
    cross-check.
 7. **3,390 structures are `height_suspect`** (Vexcel height under 3 m, not a shed or garage). Their `height_m` and
    `floors` are null unless CoStar has the building.
-8. **Vexcel's building type is wrong for many "institutional" structures** (4,417 here). Hammad's check against
-   the county Assessor found most of them are homes or apartments (`data/BUILDING_MODEL.md`, branch `hammad_1`).
-   These rows have `building_type = 'institutional'` and null `units`, so they have no people.
-9. **`units` is null for 8,466 rows:** sheds and garages (2,256), institutional, commercial and industrial
-   structures, and structures with a suspect height. The risk score must handle null, not treat it as zero.
+8. **Vexcel's building type is wrong for many "institutional" structures.** Vexcel gives this type to 4,480
+   structures here. The Assessor says 3,698 of them are homes or apartments, and 340 are institutional. The
+   resolved `building_type` now follows the Assessor. 24 institutional rows still rest on Vexcel's guess alone.
+9. **`units` is null for 5,846 rows:** sheds and garages (2,250), commercial (1,495), institutional (1,475),
+   industrial (473), hotel (97), and 56 others. Null means "people not known". The risk score must handle null,
+   not treat it as zero.
 10. **`est_occupants` covers homes only.** Offices, shops and hotels have no occupant estimate (day and night
     counts differ, and we did not load tenant data).
-11. **Most values are estimates.** `units_source` is `estimated` for 31,473 rows and `costar` for 307. Average
-    `confidence` is 0.41.
+11. **Unit counts are records now, heights are still estimates.** `units_source` is `assessor` for 33,524 rows,
+    `costar` for 329 and `estimated` for 547. `floors` is an estimate from the Vexcel height for 34,290 rows.
+    Average `confidence` is 0.57.
 12. **Shared parcels (37 CoStar properties):** every non-accessory structure on the parcel gets the CoStar floors
     and height. A tower next to a low building on one parcel both get the tower's floors. Check
     `shares_costar_property`.
@@ -305,14 +354,16 @@ section where they fit. That is why the numbers are not in order.
     in the demo, add a `contacts` row with our own phone and `is_test_number = true`.
 14. **2 footprints are not valid polygons** (`st_isvalid` is false). They store and draw, and some PostGIS
     functions can fail on them. Wrap with `st_makevalid` if you need area or intersection.
-15. **No senior housing in this area.** `is_senior_housing` is false for every apartment property here.
+15. **CoStar marks no senior housing in this area.** `is_senior_housing` is false for every apartment property
+    here. The Assessor does show care homes: 74 structures (448 units) are on lots described as
+    `Homes For Aged & Others`. The risk score does not use this yet: it gives them the normal need rate.
 
 25. **383 Vexcel heights are below zero** (lowest -4.9 m). Each one is `height_suspect` or accessory, so it is never used as `height_m`
     for a home.
-26. **Some estimated unit counts are far too high.** 34 rows have an estimated `units` above 200, and the highest is
-    3,271. The rule (footprint x floors / 85 m2) breaks on very large structures that Vexcel types as
-    multi-family (probably large non-residential buildings; we did not check them by eye). CoStar's largest real property here has 597 units. Cap or check
-    estimated values above about 200 before you use them in a ranking.
+26. **Some estimated unit counts are far too high.** The rule (footprint x floors / 85 m2) breaks on very large
+    structures that Vexcel types as multi-family. Before the Assessor load, 34 rows had an estimated `units`
+    above 200. Now 2 rows do (highest 3,271), because most rows have a real count. Cap or check estimated values
+    above about 200 before you use them in a ranking.
 27. **The direction of `roof_condition` is not documented** in the Vexcel tutorial. In the 3 buildings we looked at by hand, the
     roofs with defects had lower grades, so higher is probably better. That is a guess from a small sample. Confirm with the Vexcel mentors before you build on it.
 28. **`tree_density_zone1` goes above 100** on 712 rows (highest 262). So it is not a plain percent, and we do not
@@ -323,32 +374,57 @@ section where they fit. That is why the numbers are not in order.
 29. **`risk_score` does not know where the fire is.** A large apartment block far from any fire scores above a
     small house next to the fire. Before you send a unit, keep only the buildings that the fire threatens (for
     example by `fire_arrival_min`), then use `risk_score` to order them.
-30. **`risk_score` is null for 1,405 rows** (commercial, office, retail, industrial, and 3 CoStar rows with no
-    unit count and no outline). Null means "people not known", not "safe". Postgres puts nulls first in a descending sort: use
-    `order=risk_score.desc.nullslast`.
-31. **Most of the top of the ranking rests on estimated unit counts.** Of the 50 highest scores, 12 use a CoStar
-    unit count, 22 use an estimated count (20 of them sit at the 200-unit cap), and 16 are "institutional"
-    structures whose units we filled in from the outline. The institutional rows hold about a third of all
-    `people_at_risk`. Some of them are probably not housing (problem 8). County Assessor data would fix most of
-    this (problem 17).
-32. **The order at the top depends on the 200-unit cap.** With a cap of 100, only 17 of the top 50 stay in the top
-    50. The tree, roof and construction weights change 0 to 3 of the top 50 when moved by 50%, because
-    `people_at_risk` runs from 0.2 to 136 and `structure_factor` only from 0.70 to 1.81.
-33. **`structure_factor` is a relative scale with a median of 1.37, not 1.** Compare rows with each other. Do not
+30. **`risk_score` is null for 3,534 rows:** commercial (1,495), institutional (1,451), industrial (473), hotel
+    (97), office (14), retail (2), and 2 CoStar rows with no unit count and no outline. Null means "people not
+    known", not "safe". Schools, hospitals and hotels are in this group. Postgres puts nulls first in a
+    descending sort: use `order=risk_score.desc.nullslast`.
+31. **The top of the ranking now rests on records.** Of the 50 highest scores, 21 use a CoStar unit count, 23 an
+    Assessor count, 4 an estimated count (2 sit at the 200-unit cap), and 2 are structures of unknown use that the
+    score filled in. Before the Assessor load and the CoStar fix, 38 of the 50 rested on an estimate.
+32. **The order at the top depends little on the weights.** With a unit cap of 100 in place of 200, 44 of the top
+    50 stay in the top 50. Each tree, roof and construction weight changes 0 to 2 of the top 50 when moved by 50%,
+    because `people_at_risk` runs from 0.2 to 168 and `structure_factor` only from 0.70 to 1.81. The structure
+    weights matter among buildings of the same size.
+33. **`structure_factor` is a relative scale with a median of 1.36, not 1.** Compare rows with each other. Do not
     read it as a chance of burning.
-34. **One-unit homes all have `people_at_risk` = 0.228.** Among them only `structure_factor` changes the score
-    (0.20 to 0.41).
-35. **18 structures that are not sheds or garages score 0.** They stand on a lot with a CoStar property and got 0
-    of its units in the split (problem 12). The other structures on the lot hold the people.
+34. **One-unit homes all have `people_at_risk` = 0.228** (19,364 structures). Among them only `structure_factor`
+    changes the score (0.20 to 0.41).
+35. **5,837 structures that are not sheds or garages score 0.** They got 0 homes in the split of a lot or a CoStar
+    property (problem 38). The other structures on the lot hold the people.
 
+### County Assessor and CoStar unit counts
+
+36. **CoStar's `totalNumUnits` is not the number of units in the building.** The kit's model file says it counts
+    the units listed on floor-plan records. Against the sum of the floor plans it is exactly equal on 6 of 239
+    apartment properties here and wrong by 2x or more on 105 (typical value: 62% of the real count). Until
+    2026-11-14 the import used it, so `units`, `est_occupants` and `risk_score` of CoStar rows were too low. The
+    import now uses the sum of the floor plans.
+37. **The tax roll has placeholder values.** Three lots in the downloaded area have 999 in a unit slot (a single home with 1 + 999
+    units); the import leaves that value out. Bedroom totals of exactly 99 are probably a placeholder too; we
+    store them as they are. One lot has a year built of 1822.
+38. **Assessor values are for the lot, not for the structure.** About 30% of Vexcel parcels have 2 or more
+    structures that can hold people. The homes of the lot are split by size, so a one-home lot with a house and a second small structure
+    gives the house 1 and the other 0. Of the 5,837 structures with 0 units, 4,317 have an outline under 60 m2
+    (probably garages and sheds that Vexcel typed as homes). For a count of homes or people, add up `units`, never
+    `assessor_units`.
+39. **Unit counts on lots that are not housing are not used.** On shop, office, hotel and industrial lots the tax
+    record counts shops, suites or rooms. We do not count them: the 97 hotel
+    structures have null `units`. Mixed lots described as `Store Combination` are counted, because on
+    12 of 12 CoStar apartment properties on such lots the count matched the floor plans.
+40. **The Assessor and CoStar disagree on about 1 property in 25.** On 10 of 239 apartment properties the two
+    counts differ by 2x or more, and on 10 the Assessor has none. Several are new buildings whose lot still has
+    the old use (a restaurant, a parking lot). CoStar wins in the import.
+41. **Government lots are typed `institutional`.** 1,120 structures stand on lots of use type `Government`. They
+    include schools and offices, and the tax record does not say which. People not known.
+
+### Differences from other parts of the project
 ### Differences from other parts of the project
 
 16. **The area is smaller than the demo area.** The demo pipeline on branch `hammad_1` uses the Hollywood plan
     area plus the Sunset Fire evacuation areas (42,557 buildings). This database holds the plan area only
     (40,246). To match, run the import with that boundary (see "How to load it again").
-17. **County Assessor data is not loaded.** `CONTRACTS.md` names the Assessor as the main source for units, use and
-    year built. The `assessor` source label and its weight exist, and no row uses them yet. Loading it would
-    replace most `estimated` units.
+17. **County Assessor data is loaded for units, use and year built** (2026-11-14). Floor area is not loaded, and
+    the demo pipeline on branch `hammad_1` reads its own copy. The two can differ.
 18. **Floor height differs:** `DemoBuilding.height_m` in `CONTRACTS.md` uses stories x 3.2 m. This database uses
     3.3 m. The difference is 3%.
 19. **Row ids are not the pipeline's ids.** `buildings.id` is a UUID made by the import. Join to pipeline output by

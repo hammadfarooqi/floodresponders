@@ -65,6 +65,15 @@ create table if not exists buildings (
   vexcel_survey         text,
   vexcel_survey_date    date,
 
+  -- County Assessor, the tax record of the lot (or lots) under the center of the structure. Values are for the
+  -- whole lot, not for this structure. All null when no lot is under it.
+  assessor_ain          text,                 -- lot number (10 digits). The lot with the most homes when several
+  assessor_use_type     text,
+  assessor_use_description text,
+  assessor_units        int,                  -- homes on the lot; null = not known
+  assessor_bedrooms     int,
+  assessor_year_built   int,
+
   -- Resolved values: what the app uses. *_source is 'costar', 'vexcel', 'assessor', 'estimated' or null.
   building_type         text,
   building_type_source  text,
@@ -77,7 +86,8 @@ create table if not exists buildings (
   est_occupants         int,
   occupants_source      text,
   construction_material text,                 -- CoStar only
-  year_built            int,                  -- CoStar only
+  year_built            int,
+  year_built_source     text,                 -- 'costar' or 'assessor'
   is_walkup             boolean,              -- CoStar only
   passenger_elevators   int,                  -- CoStar only
   has_sprinklers        boolean,              -- CoStar only
@@ -93,6 +103,13 @@ create table if not exists buildings (
   people_at_risk        numeric,              -- estimated people who cannot leave without help
   structure_factor      numeric               -- 0.5 to 2.0; higher = more likely to burn
 );
+alter table buildings add column if not exists year_built_source text;
+alter table buildings add column if not exists assessor_ain text;
+alter table buildings add column if not exists assessor_use_type text;
+alter table buildings add column if not exists assessor_use_description text;
+alter table buildings add column if not exists assessor_units int;
+alter table buildings add column if not exists assessor_bedrooms int;
+alter table buildings add column if not exists assessor_year_built int;
 alter table buildings add column if not exists risk_score numeric;
 alter table buildings add column if not exists people_at_risk numeric;
 alter table buildings add column if not exists structure_factor numeric;

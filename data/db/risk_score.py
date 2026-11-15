@@ -54,6 +54,9 @@ RANKED = {
 
 # Types with no estimate of the people inside (it depends on the hour, and tenant data is not loaded).
 NO_PEOPLE_ESTIMATE = {"commercial", "office", "retail", "industrial", "hotel", "land"}
+# "institutional" from one of these sources is a school, a church or the like. From Vexcel it is a guess from a
+# photo, and most of those structures are homes (DATABASE.md, problem 8), so the score fills them in as homes.
+RECORD_SOURCES = {"costar", "assessor"}
 
 
 # ---------------------------------------------------------------- people at risk
@@ -64,10 +67,13 @@ def units_for_score(row, w=WEIGHTS):
     if units is not None:
         return min(units, w["units_cap"]) if row.get("units_source") == "estimated" else units
     area = row.get("footprint_area_m2")
-    if row.get("building_type") in NO_PEOPLE_ESTIMATE or not area:
+    kind = row.get("building_type")
+    if kind in NO_PEOPLE_ESTIMATE or not area:
+        return None
+    if kind == "institutional" and row.get("building_type_source") in RECORD_SOURCES:
         return None
     floor_area = float(area) * (row.get("floors") or w["default_floors"])
-    if row.get("building_type") != "multi_family" and floor_area <= w["house_max_floor_area_m2"]:
+    if kind != "multi_family" and floor_area <= w["house_max_floor_area_m2"]:
         return 1
     return min(max(2, round(floor_area / br.FLOOR_AREA_PER_UNIT_M2)), w["units_cap"])
 

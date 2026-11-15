@@ -151,3 +151,164 @@ def test_residential_property():
     assert row["costar_id"] == "res-5" and row["property_type"] == "single_family" and row["total_units"] == 1
     assert row["has_accessibility_features"] is True and row["matterport_model_ids"] == ["m1"]
     assert br.residential_property({"property": {"address": {}}}) is None
+
+
+# ---------------------------------------------------------------- CoStar unit count
+
+def apartment_record(**apartment):
+    return {"id": 8, "propertyType": 11, "primaryAddress": {"latitude": 34.1, "longitude": -118.3},
+            "propertyApartment": apartment}
+
+
+def test_costar_units_come_from_the_floor_plans_not_from_total_num_units():
+    plans = [{"numUnits": 30}, {"numUnits": 25}, {"numUnits": None}]
+    assert br.commercial_property(apartment_record(totalNumUnits=15, models=plans))["total_units"] == 55
+    assert br.commercial_property(apartment_record(totalNumUnits=15, models=plans), listing_units=70)["total_units"] == 55
+    assert br.commercial_property(apartment_record(totalNumUnits=15), listing_units=48)["total_units"] == 48
+    assert br.commercial_property(apartment_record(totalNumUnits=15))["total_units"] is None
+    hotel = {"id": 9, "propertyType": 1, "primaryAddress": {"latitude": 34.1, "longitude": -118.3},
+             "propertyHospitality": {"numUnits": 120}}
+    assert br.commercial_property(hotel)["total_units"] == 120
+
+
+# ---------------------------------------------------------------- County Assessor
+
+def lot(x, y, size=0.001, ain="5000000001", use_type="Residential", description="Five or more apartments",
+        units=(12,), years=("1960",), bedrooms=(20,)):
+    """One feature of the county parcel layer, in the shape the service returns."""
+    attributes = {"AIN": ain, "UseType": use_type, "UseDescription": description}
+    for n in range(1, 6):
+        attributes[f"Units{n}"] = units[n - 1] if n <= len(units) else None
+        attributes[f"YearBuilt{n}"] = years[n - 1] if n <= len(years) else None
+        attributes[f"Bedrooms{n}"] = bedrooms[n - 1] if n <= len(bedrooms) else None
+    return {"attributes": attributes, "geometry": {"rings": [square(x, y, size)]}}
+
+
+def one(kind="multiple_family", lots=(), properties=(), **over):
+    """The row of one structure at (0.0001, 0.0001) on a Vexcel parcel at (0, 0)."""
+    return br.build([parcel(0, 0, [structure(0.0001, 0.0001, kind, **over)])], list(properties), list(lots))[0]
+
+
+def test_assessor_units_type_and_year_beat_our_estimate():
+    row = one(lots=[lot(0, 0)], height=10.0, area=425.0)
+    assert (row["units"], row["units_source"]) == (12, "assessor")          # the estimate would be 15
+    assert row["est_occupants"] == 29
+    assert (row["building_type"], row["building_type_source"]) == ("multi_family", "assessor")
+    assert (row["year_built"], row["year_built_source"]) == (1960, "assessor")
+    assert (row["assessor_ain"], row["assessor_units"], row["assessor_bedrooms"]) == ("5000000001", 12, 20)
+    assert (row["assessor_use_type"], row["assessor_use_description"]) == ("Residential", "Five or more apartments")
+    assert row["assessor_year_built"] == 1960
+    assert row["confidence"] > 0.45
+
+
+def test_no_assessor_lot_leaves_the_row_as_before():
+    row = one(lots=[lot(5, 5)], height=10.0, area=425.0)
+    assert (row["units"], row["units_source"]) == (15, "estimated")
+    assert row["building_type_source"] == "vexcel"
+    assert row["year_built"] is None and row["year_built_source"] is None
+    assert row["assessor_ain"] is None and row["assessor_units"] is None
+
+
+def test_costar_beats_the_assessor():
+    row = one(lots=[lot(0, 0)], properties=[prop(0.0005, 0.0005)])
+    assert (row["units"], row["units_source"]) == (40, "costar")
+    assert (row["building_type"], row["building_type_source"]) == ("multi_family", "costar")
+    assert (row["year_built"], row["year_built_source"]) == (1990, "costar")
+    assert row["assessor_units"] == 12                                      # kept for the cross-check
+
+
+def test_assessor_fills_what_costar_does_not_know():
+    row = one(lots=[lot(0, 0)], properties=[prop(0.0005, 0.0005, total_units=None, year_built=None)])
+    assert (row["units"], row["units_source"]) == (12, "assessor")
+    assert (row["year_built"], row["year_built_source"]) == (1960, "assessor")
+    assert row["building_type_source"] == "costar"
+
+
+def test_assessor_units_are_split_across_the_structures_of_a_lot():
+    structures = [structure(0.0001, 0.0001, area=300.0, height=10.0),
+                  structure(0.0005, 0.0001, area=100.0, height=10.0, primary=False),
+                  structure(0.0005, 0.0005, kind="shed", area=10.0, height=2.0, primary=False)]
+    main, second, shed = br.build([parcel(0, 0, structures)], [], [lot(0, 0, units=(5, 3))])
+    assert (main["units"], second["units"]) == (6, 2)                       # the lot has 5 + 3 = 8
+    assert main["units_source"] == second["units_source"] == "assessor"
+    assert main["assessor_units"] == second["assessor_units"] == 8
+    assert shed["units"] is None and shed["building_type"] == "accessory"
+
+
+def test_one_home_lot_with_two_structures_gives_the_unit_to_the_larger():
+    structures = [structure(0.0001, 0.0001, "single_family", area=200.0, height=6.0),
+                  structure(0.0005, 0.0001, "single_family", area=40.0, height=3.5, primary=False)]
+    home, small = br.build([parcel(0, 0, structures)], [], [lot(0, 0, description="Single", units=(1,))])
+    assert (home["units"], small["units"]) == (1, 0)
+    assert small["est_occupants"] == 0
+
+
+def test_stacked_condo_lots_add_up():
+    lots = [lot(0, 0, ain=f"500000000{n}", description="Single", units=(1,), bedrooms=(2,)) for n in (1, 2, 3)]
+    row = one(lots=lots)
+    assert (row["units"], row["units_source"]) == (3, "assessor")
+    assert row["building_type"] == "multi_family"
+    assert row["assessor_units"] == 3 and row["assessor_bedrooms"] == 6
+
+
+def test_the_same_lot_in_two_tiles_counts_once():
+    row = one(lots=[lot(0, 0), lot(0, 0)])
+    assert row["units"] == 12
+
+
+def test_residential_lot_with_no_unit_count_falls_back_to_the_estimate():
+    row = one("single_family", lots=[lot(0, 0, description="Single", units=(0,))])
+    assert (row["units"], row["units_source"]) == (1, "estimated")
+    assert (row["building_type"], row["building_type_source"]) == ("single_family", "assessor")
+    assert row["assessor_units"] is None                                    # 0 on the tax roll: not known
+
+
+def test_assessor_corrects_a_wrong_vexcel_type():
+    row = one("institutional_buildings", lots=[lot(0, 0, description="Single", units=(1,))])
+    assert (row["building_type"], row["units"], row["units_source"]) == ("single_family", 1, "assessor")
+
+
+def test_units_on_a_shop_lot_are_not_homes_but_store_combination_and_care_homes_are():
+    shop = one(lots=[lot(0, 0, use_type="Commercial", description="Stores", units=(4,))], height=10.0, area=425.0)
+    assert (shop["building_type"], shop["building_type_source"]) == ("commercial", "assessor")
+    assert shop["units"] is None and shop["assessor_units"] is None and shop["est_occupants"] is None
+    mixed = one(lots=[lot(0, 0, use_type="Commercial", description="Store Combination", units=(20,))])
+    assert (mixed["building_type"], mixed["units"], mixed["units_source"]) == ("multi_family", 20, "assessor")
+    care = one(lots=[lot(0, 0, use_type="Institutional", description="Homes For Aged & Others", units=(30,))])
+    assert (care["units"], care["units_source"]) == (30, "assessor")
+    assert care["assessor_use_description"] == "Homes For Aged & Others"
+
+
+def test_assessor_use_types_map_to_our_types():
+    kinds = {("Commercial", "Hotel & Motels"): "hotel", ("Commercial", "Office Buildings"): "commercial",
+             ("Industrial", "Industrial"): "industrial", ("Institutional", "Churches"): "institutional",
+             ("Government", "Government Parcel"): "institutional", ("Recreational", "Theaters"): "commercial"}
+    for (use_type, description), expected in kinds.items():
+        row = one(lots=[lot(0, 0, use_type=use_type, description=description, units=())])
+        assert (row["building_type"], row["building_type_source"]) == (expected, "assessor"), description
+    unknown = one(lots=[lot(0, 0, use_type="Miscellaneous", description="Utility", units=())])
+    assert (unknown["building_type"], unknown["building_type_source"]) == ("multi_family", "vexcel")
+    blank = one(lots=[lot(0, 0, use_type=None, description=None, units=())])
+    assert blank["building_type_source"] == "vexcel"
+
+
+def test_costar_units_are_taken_off_the_lot_before_the_split():
+    """One assessor lot of 50 units over two Vexcel parcels. CoStar has 40 on the first, so 10 are left."""
+    parcels = [parcel(0, 0, [structure(0.0001, 0.0001)]), parcel(0.002, 0, [structure(0.0021, 0.0001)])]
+    with_costar, other = br.build(parcels, [prop(0.0005, 0.0005)], [lot(0, 0, size=0.004, units=(50,))])
+    assert (with_costar["units"], with_costar["units_source"]) == (40, "costar")
+    assert (other["units"], other["units_source"]) == (10, "assessor")
+
+
+def test_assessor_year_ignores_bad_values():
+    row = one(lots=[lot(0, 0, years=("0000", "1975", "1931"))])
+    assert row["year_built"] == 1931
+    assert one(lots=[lot(0, 0, years=("0",))])["year_built"] is None
+
+
+def test_assessor_placeholder_999_is_not_a_unit_count():
+    row = one("single_family", lots=[lot(0, 0, description="Single", units=(1, 999))])
+    assert (row["units"], row["assessor_units"]) == (1, 1)
+    only_placeholder = one("single_family", lots=[lot(0, 0, description="Single", units=(999,))])
+    assert (only_placeholder["units"], only_placeholder["units_source"]) == (1, "estimated")
+    assert only_placeholder["assessor_units"] is None
