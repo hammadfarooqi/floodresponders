@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     const buildings = all.filter(b => b.fire_arrival_min !== null && b.people_est > 0).map(b => ({
       id: b.id, lat: b.lat, lng: b.lng, people_est: b.people_est, people_need_help_est: b.people_need_help_est,
       fire_arrival_min: b.fire_arrival_min, units: b.units, height_m: b.height_m,
-      costar: b.costar ? { name: b.costar.name, address: b.costar.address, stories: b.costar.stories,
+      costar: b.costar ? { id: b.costar.id, name: b.costar.name, address: b.costar.address, stories: b.costar.stories,
                            manager: b.costar.manager } : null,
     }));
     const stations = JSON.parse(await readFile(path.join(DEMO_DIR, "stations.json"), "utf8")).stations;
