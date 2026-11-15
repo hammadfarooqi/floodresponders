@@ -468,21 +468,24 @@ export default function ConsoleView() {
 
       {/* bottom: priority queue + command line */}
       <section className="queue">
-        <h2>Priority queue <span className="dim">people needing help × urgency · {queue.length >= 40 ? "top 40" : queue.length} buildings</span></h2>
+        <h2>Priority queue <span className="dim">dynamic risk = people who need help × fire threat (rises as the fire comes near) · {queue.length >= 40 ? "top 40" : queue.length} buildings</span></h2>
         <div className="qscroll">
-          <table><thead><tr><th>#</th><th>Building</th><th>Need help</th><th>Inside</th><th>Fire in</th><th>Unit</th><th>Source</th></tr></thead><tbody>
+          <table><thead><tr><th>#</th><th>Building</th><th>Risk now</th><th>Static</th><th>Threat</th><th>Need help</th><th>Inside</th><th>Fire in</th><th>Unit</th><th>Source</th></tr></thead><tbody>
             {queue.map((b, i) => {
               const us = assignedTo(b.id), pp = pendingFor(b.id);
-              const left = b.fire - t;
+              const left = b.fire - t, r = s!.riskOf(b);
               return (
                 <tr key={b.id} className={selBld === b.id ? "sel" : ""} onClick={() => setSelBld(b.id)}>
                   <td className="mono dim">{i + 1}</td>
                   <td>{b.label}</td>
-                  <td className="mono p">{n0(b.needKnown)}</td>
+                  <td className="mono"><b>{r.risk.toFixed(1)}</b></td>
+                  <td className="mono dim" title="Rasul's static risk_score (Supabase), no fire">{b.riskStatic != null ? b.riskStatic.toFixed(1) : "–"}</td>
+                  <td className="mono" title="1 = fire far; rises as the fire comes near">×{r.threat.toFixed(1)}</td>
+                  <td className="mono p" title={`ranking uses ${r.people.toFixed(1)} (${r.source})`}>{n0(b.needKnown)}</td>
                   <td className="mono">{n0(b.able + b.need)}</td>
                   <td className={`mono ${left < 15 ? "r" : left < 40 ? "a" : ""}`}>{mins(left)}</td>
                   <td>{us.map(x => <span key={x.id} className={`st ${x.status}`}>E{x.station}</span>)}{pp.map(p => <span key={p.id} className="st prop">E{p.truck.slice(1)}?</span>)}{!us.length && !pp.length && <span className="dim">unassigned</span>}</td>
-                  <td className="dim small">{b.hidden < b.stuck || (b.stuck > 0 && b.needKnown >= b.stuck) ? "call" : b.costar ? "CoStar" : "estimate"}</td>
+                  <td className="dim small">{r.source}</td>
                 </tr>);
             })}
           </tbody></table>

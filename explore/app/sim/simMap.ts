@@ -11,6 +11,10 @@ export const NEED_PER_DOT = 1;    // one purple dot = 1 person who needed help
 export const WALK_M_PER_MIN = { able: 80, need: 30 };  // walking speed along the streets (assumption)
 export const COLORS = { able: "#22c55e", need: "#c084fc", trapped: "#ef4444", truck: "#f97316", onscene: "#16a34a", proposal: "#38bdf8" };
 
+/** Risk view: building color = dynamic risk score now (people x structure x threat), 7 steps, each step 2x the last. */
+export const RISK_RAMP = ["#fff7bc", "#fee391", "#fec44f", "#fe9929", "#ec7014", "#cc4c02", "#8c2d04"];
+export const riskStep = (r: number) => (r < 0.5 ? 0 : Math.max(1, Math.min(7, 1 + Math.floor(Math.log2(r)))));
+
 export interface Loaded {
   g: RoadGraph; buildings: DemoBuildingLite[]; stations: StationLite[]; origin: [number, number];
   cells: { id: number; t: number }[]; arrivals: [string, number][];
@@ -144,6 +148,10 @@ export class SimRenderer {
   private lastPush = -1e9;
   private ringKey = "";   // wall time of the last setData on the moving layers
   private size = { w: 0, h: 0 };          // map size in px (read on resize, not every frame)
+  private riskOn = false;                 // risk view: buildings colored by dynamic risk (feature-state "rk")
+  private rk = new Int8Array(0);          // last risk step sent to the map, per sim building
+  private lastRisk = -1e9;
+  private statePaint: unknown = null;     // the normal building paint (state colors), kept to switch back
   onTruckClick?: (id: string) => void;
 
   constructor(private m: maplibregl.Map, private d: Loaded) {
@@ -176,8 +184,38 @@ export class SimRenderer {
       features: b ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [b.lng, b.lat] } }] : [] });
   }
 
+  /** Switch the risk view on or off. Changes the paint expression once (never per frame); steps go by feature-state. */
+  setRiskView(on: boolean, s: Simulation | null) {
+    this.statePaint ??= this.m.getPaintProperty("buildings", "fill-extrusion-color");
+    this.riskOn = on;
+    if (on) {
+      // people inside -> risk step color (grey if nobody there needs help); burned and empty keep their state colors
+      const base = JSON.parse(JSON.stringify(this.statePaint)) as unknown[];
+      const ramp: unknown[] = ["match", ["coalesce", ["feature-state", "rk"], 0]];
+      RISK_RAMP.forEach((c, i) => ramp.push(i + 1, c));
+      ramp.push("#a8a29e");
+      base[3] = ramp;    // ["match", st, 1, <occupied color>, ...]: index 3 is the color for st = 1
+      this.m.setPaintProperty("buildings", "fill-extrusion-color", base as never);
+    } else this.m.setPaintProperty("buildings", "fill-extrusion-color", this.statePaint as never);
+    this.lastRisk = -1e9;
+    if (s && on) this.updateRisk(s, true);
+  }
+
+  private updateRisk(s: Simulation, force = false) {
+    const now = performance.now();
+    if (!force && now - this.lastRisk < 500) return;   // at most twice a second; only changed steps are sent
+    this.lastRisk = now;
+    if (this.rk.length !== s.buildings.length) this.rk = new Int8Array(s.buildings.length).fill(-1);
+    for (const b of s.buildings) {
+      if (b.burned) continue;
+      const k = b.needKnown > 0.5 ? riskStep(s.riskOf(b).risk) : 0;
+      if (k !== this.rk[b.idx]) { this.rk[b.idx] = k; this.m.setFeatureState({ source: "buildings", id: b.id }, { rk: k }); }
+    }
+  }
+
   reset(s: Simulation) {
     const m = this.m;
+    this.rk = new Int8Array(s.buildings.length).fill(-1); this.lastRisk = -1e9;
     m.removeFeatureState({ source: "fire" }); m.removeFeatureState({ source: "buildings" });
     this.fire = { burn: 0, cool: 0, bld: 0 };
     this.shown = new Int8Array(s.buildings.length).fill(-1);
@@ -269,6 +307,7 @@ export class SimRenderer {
       }
     }
     s.dirty.clear();
+    if (this.riskOn) this.updateRisk(s, force);
     // The moving layers (walkers, routes, pairing lines) are re-sent to the map worker at most 20 times a second.
     // Sending them every frame (~120/s) made ~100 MB of garbage every 20 s and caused long frames.
     const now = performance.now();

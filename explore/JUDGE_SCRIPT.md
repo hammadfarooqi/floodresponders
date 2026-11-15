@@ -55,9 +55,11 @@ people inside. Green dots are people walking out along the streets, purple dots 
 Say: "For every truck and every building, the AI asks one question: how many people does this help, per minute
 of truck time?"
 
-- **People who need help** in the building (our estimate, or the number a phone call gave us).
-- **× urgency:** how soon the fire arrives. A building 30 minutes from the fire counts half as much as one the
-  fire reaches now.
+- **A risk score that changes over time.** It starts from building records: how many people in the building
+  cannot leave without help (units from CoStar and the County Assessor, more for walk-ups with no elevator; our
+  teammate's score in Supabase). Then the fire multiplies it: × 1 when the fire is far, up to × 10 when the fire
+  is about to arrive. So the same building climbs the list as the fire comes near. When a phone call tells us the
+  real number of people, that number replaces the estimate.
 - **÷ truck time:** drive time on real streets + time to bring everyone out.
 - **Only if the truck can arrive at least 3 minutes before the fire.** We never send a crew into a building
   it cannot reach in time.
@@ -74,10 +76,10 @@ Two calls in the demo show this:
 
 | Same fire, people, calls and trucks | Today (911 calls) | Roll Call |
 |---|---|---|
-| People trapped | 310 | 52 |
-| ... of them people who needed help | 299 | 41 |
+| People trapped | 310 | 67 |
+| ... of them people who needed help | 299 | 55 |
 
-"In this simulation, Roll Call leaves about **83% fewer people trapped**." While the run plays, point at the red
+"In this simulation, Roll Call leaves about **78% fewer people trapped**." While the run plays, point at the red
 phones: those are people waiting in the 911 queue. In the Roll Call run, trucks are often already on the way
 before anyone calls.
 
@@ -87,7 +89,7 @@ before anyone calls.
 - **Every assumption is on screen** (click "show assumptions"). Nothing is hidden in the code.
 - **We tried changing each assumption.** Fewer or more people calling 911 (40% to 100%), 2 to 10 call-takers,
   slower or faster crews, trucks at 20 or 45 km/h, people leaving more slowly, other random seeds. Today's dispatch
-  traps 280 to 470 people; Roll Call traps 44 to 136. **Roll Call is better in every case.** The exact numbers
+  traps 118 to 434 people; Roll Call traps 39 to 105. **Roll Call is better in every case.** The exact numbers
   change a lot; the direction does not.
 - **We say what it is not.** This is a simulation with assumptions. It is not a count of real lives saved, and
   the phone calls in the demo are scripted. The fire model ignores slope, wind gusts and embers.

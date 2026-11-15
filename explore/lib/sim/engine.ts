@@ -23,7 +23,14 @@ export interface SimConfig {
   rematch_every_min: number;        // AI only
   arrive_before_fire_min: number;   // AI only: do not send a truck that arrives later than this before the fire
   withdraw_before_fire_min: number; // crews leave a building this long before the fire reaches it (both runs)
-  urgency_tau_min: number;          // AI urgency = 1 / (1 + minutes_left / tau)
+  urgency_tau_min: number;          // AI time term: urgency = 1 / (1 + minutes_left / tau); threat = 1 + urgency
+  // AI ranking (ranking only: the simulated people are the same in every run)
+  priority_rule: "risk" | "urgency"; // "risk" = dynamic risk score: people x structure x threat(t) (Rasul's score +
+                                     // fire timing); "urgency" = the earlier rule, people x urgency
+  risk_people: "rasul" | "estimate"; // people count behind the ranking: Rasul's people_at_risk (Supabase) or our
+                                     // 10% estimate. A call that reports the real count replaces either.
+  risk_structure: boolean;           // multiply by Rasul's structure_factor (0.5-2.0: trees, neighbors, construction)
+  threat_boost: number;              // threat = 1 + threat_boost x urgency: the fire can raise a score up to (1 + this) times
   match_rule: "rate" | "fleet" | "priority";  // AI: "rate" = people helped per minute of truck time (greedy);
                                               // "fleet" = whole-fleet assignment by people a crew can help (CONTRACTS phase 4, #80);
                                               // "priority" = most urgent first
@@ -49,6 +56,10 @@ export const DEFAULT_CONFIG: SimConfig = {
   arrive_before_fire_min: 3,
   withdraw_before_fire_min: 3,
   urgency_tau_min: 30,
+  priority_rule: "risk",
+  risk_people: "rasul",
+  risk_structure: false,
+  threat_boost: 9,
   match_rule: "rate",
   duration_min: 180,
   call_share: 0.7,
@@ -67,6 +78,8 @@ export interface DemoBuildingLite {
   id: string; lat: number; lng: number;
   people_est: number; people_need_help_est: number; fire_arrival_min: number | null;
   units?: number | null; height_m?: number;
+  /** Rasul's static score, joined by location (data/pipeline/join_risk.py). Missing = no match in Supabase. */
+  risk?: { score: number | null; people: number | null; structure: number | null; source: string } | null;
   costar?: null | { name: string; address: string; stories: number | null; manager: { company: string | null; phone: string | null } };
 }
 export interface StationLite { id: string; name: string; number: number; lat: number; lng: number; node: number }
@@ -92,6 +105,11 @@ export interface SimBuilding {
   able: number;        // people inside who can leave alone (true value)
   need: number;        // people inside who need help (true value)
   needKnown: number;   // what dispatch believes (estimate; a call can raise it)
+  /** Ranking weight on needKnown: Rasul's people_at_risk / our estimate (1 = estimate, or a call confirmed the count). */
+  rankScale: number;
+  structure: number;   // Rasul's structure_factor (1 when unknown)
+  riskStatic: number | null;  // Rasul's risk_score (null = no score: people not known or no match)
+  riskSource: string;  // where the people count comes from: CoStar, Assessor, estimate, call
   hidden: number;      // people needing help that only a call reveals
   stuck: number;       // people who cannot leave alone at all (a call reports them)
   evacuated: number; evacuatedNeed: number; trapped: number; trappedNeed: number;
@@ -169,6 +187,9 @@ export class Simulation {
           id: b.id, idx, lat: b.lat, lng: b.lng, node: this.g.buildingNode[b.id] ?? -1,
           fire: b.fire_arrival_min as number, label: buildingLabel(b), costar: !!b.costar,
           able: b.people_est - need, need, needKnown: need, hidden: 0, stuck: 0,
+          rankScale: this.cfg.risk_people === "rasul" && b.risk?.people != null && need > 0 ? b.risk.people / need : 1,
+          structure: b.risk?.structure ?? 1, riskStatic: b.risk?.score ?? null,
+          riskSource: this.cfg.risk_people === "rasul" && b.risk?.people != null ? b.risk.source : "estimate",
           evacuated: 0, evacuatedNeed: 0, trapped: 0, trappedNeed: 0, burned: false, safeAble: 0, safeNeed: 0,
         };
       });
@@ -279,6 +300,9 @@ export class Simulation {
       } else if (this.policy === "ours") {
         // the caller tells dispatch how many people need help; Roll Call uses it like any other call
         if (b.need - b.needKnown >= 0.5) { b.needKnown = b.need; this.needRematch = true; }
+        // the call confirms the count; the next regular re-plan (every 5 min) ranks with it. A full re-plan for every
+        // answered call doubled the engine time and slowed playback; a count that goes UP still re-plans at once (above).
+        if (b.rankScale !== 1) { b.rankScale = 1; b.riskSource = "call"; }
         c.t_dispatch = this.trucks.some(tr => tr.building === b.id) ? this.t : null;
       }
     }
@@ -498,8 +522,28 @@ export class Simulation {
 
   // ---------- AI: people needing help x urgency, feasible before the fire, re-match ----------
   priority(b: SimBuilding): number {
-    const left = Math.max(0, b.fire - this.t);
-    return b.needKnown / (1 + left / this.cfg.urgency_tau_min);
+    // same number as riskOf(b).risk, without making an object (the matcher calls this ~100k times per re-plan)
+    const u = 1 / (1 + Math.max(0, b.fire - this.t) / this.cfg.urgency_tau_min);
+    return b.needKnown * b.rankScale * (this.cfg.risk_structure ? b.structure : 1)
+      * (this.cfg.priority_rule === "risk" ? 1 + this.cfg.threat_boost * u : u);
+  }
+
+  /** Dynamic risk score of one building now (an agent tool: the ranking behind every AI pairing).
+   *  risk = people x structure x time term. people = what dispatch believes, scaled to Rasul's people_at_risk until a
+   *  call confirms the count. threat goes from 1 (fire far) to 2 (fire here): risk is Rasul's score raised by the fire. */
+  riskOf(b: SimBuilding): { risk: number; people: number; structure: number; threat: number; minutes_left: number; source: string } {
+    const left = Math.max(0, b.fire - this.t), u = 1 / (1 + left / this.cfg.urgency_tau_min);
+    const people = b.needKnown * b.rankScale, structure = this.cfg.risk_structure ? b.structure : 1;
+    const threat = this.cfg.priority_rule === "risk" ? 1 + this.cfg.threat_boost * u : u;
+    return { risk: people * structure * threat, people, structure, threat, minutes_left: left, source: b.riskSource };
+  }
+
+  /** All buildings that still need help, highest dynamic risk first (agent tool "risk_scores"). */
+  riskScores(): { id: string; label: string; static_score: number | null; risk: number; people: number; structure: number;
+                  threat: number; minutes_left: number; source: string }[] {
+    return this.buildings.filter(b => !b.burned && b.needKnown > 0.5)
+      .map(b => ({ id: b.id, label: b.label, static_score: b.riskStatic, ...this.riskOf(b) }))
+      .sort((a, b) => b.risk - a.risk || (a.id < b.id ? -1 : 1));
   }
 
   /** full = every idle or driving truck may get a new building; otherwise only idle trucks are matched. */
@@ -542,12 +586,13 @@ export class Simulation {
       // Pick the truck-building pair that helps the most people per minute of truck time, then the next, and so on.
       // value = people needing help x urgency / (drive time + time on scene + 1)
       const left = new Set(cands);
+      const prio = new Map(cands.map(b => [b, this.priority(b)]));   // fixed during one re-plan
       while (open.size && left.size) {
         let best: { i: number; b: SimBuilding; eta: number; v: number } | null = null;
         for (const i of open) for (const b of left) {
           const eta = etaOf(i, b);
           if (!inTime(b, eta)) continue;
-          const v = this.priority(b) / (Math.max(0, eta - keep(i, b)) + b.needKnown / this.cfg.assisted_people_per_min + 1);
+          const v = prio.get(b)! / (Math.max(0, eta - keep(i, b)) + b.needKnown / this.cfg.assisted_people_per_min + 1);
           if (!best || v > best.v || (v === best.v && b.id < best.b.id)) best = { i, b, eta, v };
         }
         if (!best) break;
@@ -695,12 +740,14 @@ export class Simulation {
       const b = this.byId.get(ev.building_id);
       if (!b || b.burned) return;
       b.needKnown = Math.min(b.need, Math.max(0, ev.people_remaining));
+      b.rankScale = 1; b.riskSource = "call";   // a call gives the count: the ranking uses it as is
     } else {
       const b = this.byId.get(ev.building_id);
       if (!b || b.burned) return;
       const reveal = Math.min(ev.count, b.hidden);
       b.hidden -= reveal;
       b.needKnown = Math.min(b.need, b.needKnown + ev.count);
+      b.rankScale = 1; b.riskSource = "call";   // a call gives the count: the ranking uses it as is
     }
     this.needRematch = true;
   }

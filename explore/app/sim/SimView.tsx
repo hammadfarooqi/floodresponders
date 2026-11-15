@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { DEFAULT_CONFIG, Simulation, type LogEntry, type Policy } from "../../lib/sim/engine";
-import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, SimRenderer, TRUCK_CSS, fmtT, frameSim, loadSimLayers, n0, setHills, type Loaded } from "./simMap";
+import { ABLE_PER_DOT, COLORS, NEED_PER_DOT, RISK_RAMP, SimRenderer, TRUCK_CSS, fmtT, frameSim, loadSimLayers, n0, setHills, type Loaded } from "./simMap";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 
 const DURATION = 180, RUN_SECONDS = 25;
@@ -13,7 +13,7 @@ const VIEW = { center: [-118.338, 34.094] as [number, number], zoom: 13.75, pitc
 const RUNS: Record<Policy, { n: number; title: string; sub: string }> = {
   calls: { n: 1, title: "Today: 911 calls", sub: "A truck goes only where someone got through on 911. Calls are answered in order; the oldest call gets the closest free truck. No re-planning." },
   nearest: { n: 1, title: "Nearest first", sub: "Each free truck goes to the nearest building that needs help. It never re-plans." },
-  ours: { n: 2, title: "Roll Call AI", sub: "Sends each truck where it helps the most people per minute: people needing help × how soon the fire arrives ÷ (drive time + time on scene). Only if the truck can arrive before the fire. Re-plans every 5 min and after every call." },
+  ours: { n: 2, title: "Roll Call AI", sub: "Ranks buildings by a risk score that rises as the fire comes near (people who cannot leave alone, from building records, × fire threat), and sends each truck where it helps the most per minute of driving and work. Only if the truck can arrive before the fire. Re-plans every 5 min and after every call." },
 };
 
 type Counts = Simulation["counts"];
@@ -39,6 +39,7 @@ export default function SimView() {
   const [results, setResults] = useState<Partial<Record<Policy, Counts>>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [hills, setHillsUi] = useState(false);
+  const [riskView, setRiskView] = useState(false);
   // small screens: the feed and the legend start closed, so the trucks have room (a 1000 px wide window left 190 px)
   const [legendOpen, setLegendOpen] = useState(() => typeof window === "undefined" || window.innerHeight >= 900);
   const [feedOpen, setFeedOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 1400);
@@ -69,7 +70,7 @@ export default function SimView() {
         new maplibregl.Popup({ maxWidth: "280px" }).setLngLat(e.lngLat).setHTML(
           `<b>${b.label}</b><div style="font-size:12px;line-height:1.5">Fire arrives at ${fmtT(b.fire)}<br>` +
           `Inside: ${n0(b.able + b.need)} (need help: ${n0(b.need)})<br>Evacuated: ${n0(b.evacuated)}<br>Trapped: ${n0(b.trapped)}` +
-          `${b.costar ? "<br>CoStar: manager phone on file" : ""}</div>`).addTo(m);
+          `${b.costar ? "<br>CoStar: manager phone on file" : ""}` + riskHtml(sim.current!, b) + `</div>`).addTo(m);
       });
       // a drag, wheel or pinch by the user stops the follow camera (events from easeTo have no originalEvent)
       const stop = (e: { originalEvent?: unknown }) => { if (e.originalEvent) setFollow(false); };
@@ -206,6 +207,8 @@ export default function SimView() {
           <button className="chip" onClick={skipToEnd} disabled={!ready || !!s?.done}>skip to end</button>
           <button className={`chip ${hills ? "on" : ""}`} title="Real hill heights. Prettier, but slower while playing."
             onClick={() => { const v = !hills; setHillsUi(v); if (map.current) setHills(map.current, v); }}>3D hills</button>
+          <button className={`chip ${riskView ? "on" : ""}`} title="Color buildings by the risk score now: it rises as the fire comes near"
+            onClick={() => { const v = !riskView; setRiskView(v); renderer.current?.setRiskView(v, sim.current); }}>risk view</button>
           <button className={`chip ${follow ? "on" : ""}`} title="Keep all 8 trucks and the buildings in view"
             onClick={() => { setFollow(true); if (map.current && s) frameSim(map.current, s, 800); }}>follow trucks</button>
           <label className="chk"><input type="checkbox" checked={pauseOnCalls} onChange={e => setPauseOnCalls(e.target.checked)} /> pause on calls</label>
@@ -227,7 +230,8 @@ export default function SimView() {
             <tr><td>Truck crew</td><td>brings out {cfg.assisted_people_per_min} people per minute</td></tr>
             <tr><td>Truck speed</td><td>{cfg.truck_speed_kmh} km/h on OSM streets, no traffic, one-way rules ignored; burned streets closed</td></tr>
             <tr><td>Crews pull out</td><td>{cfg.withdraw_before_fire_min} min before the fire reaches a building (both runs)</td></tr>
-            <tr><td>AI choice</td><td>pair value = people needing help × urgency ÷ (drive min + min on scene + 1); urgency = 1 / (1 + minutes until fire / {cfg.urgency_tau_min}); best pair first</td></tr>
+            <tr><td>Risk score</td><td>risk = people who need help × {cfg.risk_structure ? "structure factor × " : ""}threat. People: Rasul&apos;s people_at_risk from building records (CoStar / County Assessor, Supabase), until a call gives the real count. Threat = 1 + {cfg.threat_boost} × urgency, urgency = 1 / (1 + minutes until fire / {cfg.urgency_tau_min}): 1 when the fire is far, up to {cfg.threat_boost + 1} when it arrives. Structure factor (trees, neighbors, construction): {cfg.risk_structure ? "on" : "off"}. Ranking only: the simulated people are the same in both runs</td></tr>
+            <tr><td>AI choice</td><td>pair value = risk ÷ (drive min + min on scene + 1); best pair first</td></tr>
             <tr><td>AI re-match</td><td>every {cfg.rematch_every_min} min and after every call</td></tr>
             <tr><td>People per building</td><td>units × 2.4 × 0.95; need help = 10% (estimate, BUILDING_MODEL.md)</td></tr>
             <tr><td>Fire</td><td>Sunset Fire origin, stronger wind toward Hollywood (about 130°); the front stops at Hollywood Blvd at 3:00 (crews hold the line)</td></tr>
@@ -272,7 +276,10 @@ export default function SimView() {
       <div className={`card legend ${legendOpen ? "" : "closed"}`}>
         <button className="lgt" onClick={() => setLegendOpen(v => !v)}>{legendOpen ? "hide legend ▾" : "legend ▴"}</button>
         <div className="lh">Buildings</div>
-        <div><i className="sq" style={{ background: BUILDING_COLORS.occupied }} />people still inside</div>
+        {riskView ? (
+          <div style={{ gridColumn: "1/-1" }}>risk now (people who need help × fire threat):{" "}
+            <span className="ramp">{RISK_RAMP.map(c => <i key={c} style={{ background: c }} />)}</span> low → high</div>
+        ) : <div><i className="sq" style={{ background: BUILDING_COLORS.occupied }} />people still inside</div>}
         <div><i className="sq" style={{ background: BUILDING_COLORS.empty }} />everyone out</div>
         <div><i className="sq" style={{ background: BUILDING_COLORS.burnedEmpty }} />burned, empty</div>
         <div><i className="sq" style={{ background: BUILDING_COLORS.burnedTrapped }} />burned, people inside</div>
@@ -304,6 +311,15 @@ export default function SimView() {
         </div>)}
     </div>
   );
+}
+
+/** Popup lines: the dynamic risk score now and what it is made of. */
+function riskHtml(s: Simulation, b: Simulation["buildings"][number]): string {
+  if (b.burned || b.needKnown <= 0.5) return "";
+  const r = s.riskOf(b);
+  return `<br><b>Risk now ${r.risk.toFixed(1)}</b> = ${r.people.toFixed(1)} people (${r.source})` +
+    `${r.structure !== 1 ? ` × structure ${r.structure.toFixed(2)}` : ""} × threat ${r.threat.toFixed(2)}` +
+    `${b.riskStatic != null ? `<br>Static score (Rasul): ${b.riskStatic.toFixed(1)}` : "<br>No static score (not in Supabase)"}`;
 }
 
 function alertBox(msg: string) {
@@ -370,6 +386,7 @@ const CSS = `
 .lgt{justify-self:end;background:none;border:0;color:#a1a1aa;font:inherit;font-size:10.5px;cursor:pointer;padding:0}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:-1px}
 .sq{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;outline:1px solid #ffffff40}
+.ramp{display:inline-flex;vertical-align:-1px;margin:0 4px}.ramp i{width:12px;height:10px;display:block}
 .lh{font-weight:700;color:#a1a1aa;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
 .truckkey{display:inline-block;font-style:normal;background:#f97316;color:#111;font-weight:700;font-size:10px;border-radius:3px;padding:0 3px;margin-right:6px}
 .result{left:50%;transform:translateX(-50%);bottom:16px;width:420px;padding:12px 14px}

@@ -7,10 +7,15 @@ import { seedHidden, driverDeclines, tenantStuck, STUCK, DECLINE } from "../lib/
 const D = "../data/demo/";
 const roads = JSON.parse(readFileSync(D + "roads.json", "utf8"));
 const bj = JSON.parse(readFileSync(D + "buildings.json", "utf8"));
-const buildings = (Array.isArray(bj) ? bj : bj.buildings).filter((b: any) => b.fire_arrival_min !== null);
+let riskJoin: Record<string, any> = {};
+try { riskJoin = JSON.parse(readFileSync(D + "risk_join.json", "utf8")).buildings; } catch { console.log("  (no risk_join.json: run data/pipeline/join_risk.py)"); }
+const buildings = (Array.isArray(bj) ? bj : bj.buildings).filter((b: any) => b.fire_arrival_min !== null).map((b: any) => {
+  const r = riskJoin[b.id];
+  return { ...b, risk: r ? { score: r.risk_score, people: r.people_at_risk, structure: r.structure_factor, source: r.source } : null };
+});
 const stations = JSON.parse(readFileSync(D + "stations.json", "utf8")).stations;
 const cfg: Partial<SimConfig> = {};
-for (const a of process.argv.slice(2)) { const [k, v] = a.split("="); (cfg as any)[k] = isNaN(Number(v)) ? v : Number(v); }
+for (const a of process.argv.slice(2)) { const [k, v] = a.split("="); (cfg as any)[k] = v === "true" ? true : v === "false" ? false : isNaN(Number(v)) ? v : Number(v); }
 const g = new RoadGraph(roads);
 for (const policy of ["calls", "nearest", "ours"] as const) {
   const t0 = performance.now();
