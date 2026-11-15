@@ -6,10 +6,11 @@ Plan v2 (fire evacuation demo, Hollywood) replaced the first draft on 2026-11-14
 
 ## Product summary (plan v2, 2026-11-14, decided by Hammad)
 
-Roll Call is an AI dispatcher for a wildfire evacuation. It scores buildings by **people who need help to get out**
-and how soon the fire reaches them, matches fire trucks to buildings, and keeps that matching up to date in real time.
+Roll Call is an AI dispatcher for a wildfire evacuation. It scores buildings by **people who need help to get out**,
+matches fire trucks to buildings before the fire reaches them, and keeps that matching up to date in real time.
 
-1. **Score** each building: estimated people who need help x urgency (minutes until the fire arrives).
+1. **Score** each building from building data: estimated people who need help x how likely the structure is to
+   burn. The fire's position is not in the score; matching adds it (changed 2026-11-14, decided by Rasul).
 2. **Match** fire trucks to buildings (most at-risk buildings get nearby trucks). Re-match every few simulated minutes.
 3. **Deep agent** runs the response: it takes calls from truck drivers ("I can't go there, I'm busy") and from
    building supervisors ("a tenant is stuck"), re-matches on its own, then calls everyone affected with the change.
@@ -64,7 +65,7 @@ Vexcel, CoStar kit, public data
 |---|---|---|---|---|
 | 1. Data | Loads every building of the area one time | Vexcel API, CoStar kit, public data | Supabase tables, `DemoBuilding` | `data/` |
 | 2. 3D map | Draws every building in 3D on the terrain | Outlines and heights from phase 1 | The map that phases 3 and 5 draw on | `web/` |
-| 3. Score | Ranks buildings and colors them on the map | Buildings, `FireTimeline`, `SimConfig` | A priority for each building | `api/`, `web/` |
+| 3. Score | Ranks buildings and colors them on the map | The `buildings` rows | A priority for each building (`risk_score`) | `data/db/`, `web/` |
 | 4. Matching and routing | Sends each responder unit to a building, on real streets | Priorities, `RoadGraph`, `Station`, `Truck` | `[Assignment]`, a route for each unit | `api/` |
 | 5. Routing on the map | Shows units, routes and people leaving, over time | Assignments, routes, simulation state | The animated run and its counters | `web/` |
 | 6. Phone call | Talks to building managers and drivers, and changes the plan | The call, the current state | `AgentEvent`, then `AgentAction` | `agent/`, `api/` |
@@ -88,8 +89,8 @@ or CoStar while it runs.
   `*_source` column, and each row has a `confidence` from 0 to 1.
 - **Order of trust:** CoStar first, then the Assessor (not loaded yet), then Vexcel, then our own estimate.
 - **Null means "not known".** It never means "no" or zero.
-- **Not stored:** fire arrival times, scores, assignments and call data. They depend on the run and belong to
-  phases 3 to 6.
+- **Not stored:** fire arrival times, assignments and call data. They depend on the run and belong to
+  phases 4 to 6. The risk score is stored, because it uses building data only (phase 3).
 - **Two forms today:** the Supabase tables, and the generated files in `data/demo/` that the API serves as
   `DemoBuilding`. They differ in area (40,246 and 42,557 buildings), floor height and ids. See `DATABASE.md`,
   problems 16 to 19.
@@ -116,21 +117,28 @@ or CoStar while it runs.
 
 **Goal:** one priority for each building, shown as a color on the map, so a person can see where help is needed.
 
-- **The score counts people who need help, and how soon the fire arrives.**
-  Priority = `people_need_help_est` x urgency. Urgency comes from `fire_arrival_min`.
-- **It does not predict which building burns.** Roof, tree cover and construction fields describe the structure.
-  They are not part of this priority.
-- **Every assumption is in `SimConfig`** (people for each unit, share who need help, and so on) and is shown in
-  the UI. Do not put a second copy of an assumption in code.
-- **Handle missing values.** `units` is null for 8,466 rows. Sheds and garages (`is_accessory`) have no people.
-  Some estimated unit counts are far too high (`DATABASE.md`, problem 26): cap them or check them.
+- **The score uses building data only:** `risk_score` = `people_at_risk` x `structure_factor`. It has no fire
+  position, no fire arrival time and no distance to a unit. Decided by Rasul on 2026-11-14: we have no fire
+  arrival time that we trust enough to build the score on, and distance belongs to matching.
+- **So the score does not say which buildings a fire threatens.** A large block far from the fire scores above a
+  small house next to it. Phase 4 must add `fire_arrival_min` and travel time before it sends a unit.
+- **`people_at_risk`** is the estimated number of people who cannot leave without help: units x people for each
+  unit x share who need help, raised for upper floors with no elevator.
+- **`structure_factor`** (0.5 to 2.0) is higher when the structure is more likely to burn: tree cover near it,
+  close neighbor buildings, wood frame. It is lower for concrete or steel, sprinklers and a paved lot. This
+  replaces the earlier rule that roof, tree and construction fields are not part of the priority.
+- **It is computed once, in the import, and stored** in `buildings` (`risk_score`, `people_at_risk`,
+  `structure_factor`). Code: `data/db/risk_score.py`. It does not change during a run.
+- **Every weight is in `WEIGHTS`** in that file and is listed in `DATABASE.md`. All are first guesses that nobody
+  has checked against a real fire yet. Do not put a second copy of a weight in other code.
+- **Missing values.** A value that is not known takes the typical value for the building type; it never makes
+  the score zero. Sheds and garages (`is_accessory`) score 0. Commercial, office, retail and industrial
+  structures have a null `risk_score`, because nobody has an estimate of the people inside. Sort with nulls last.
 - **Show confidence with the score.** Most occupant numbers are estimates. "High priority, low confidence" is a
   correct result, and a call (phase 6) is how the system learns more about that building.
 - **Flags for the responder.** These exist on CoStar rows only: `floors`, `is_walkup`, `passenger_elevators`,
   `has_sprinklers`, `construction_material`, `year_built`. Fire escapes, stairwells and exits are not in the
   database. Matterport has interior data for under 1% of buildings.
-- **The score is a pure function** of the building, the fire timeline and `SimConfig`. The same input gives the
-  same score, so phases 4 and 5 can call it again at any simulated minute.
 
 ### Phase 4: Matching and routing
 
@@ -145,7 +153,8 @@ or CoStar while it runs.
   invalid, so travel times change during the run.
 - **Input from phase 3, per building:** `building_id`, `priority` (building only: it must not include distance or
   travel time, because matching adds those), `people_need_help` (estimate, or the number a call confirmed), and
-  `fire_arrival_min`.
+  `fire_arrival_min`. In the database, `priority` is `risk_score` and the estimate of `people_need_help` is
+  `people_at_risk`. `fire_arrival_min` comes from the fire timeline, not from phase 3.
 - **Policy `"ours"` matches the whole fleet at once,** not one building at a time. The value of a unit-building
   pair is the number of people that crew can help between arrival and `withdraw_before_fire_min`, with the road
   ETA. A second unit at the same building counts only the extra people it can help. A unit may stay idle.
@@ -207,7 +216,7 @@ plan.
   (`DATABASE.md`, problem 19).
 - **Earlier phases do not depend on later ones.** The map and the score work with no calls and no units.
 - **Assumptions have one home:** `SimConfig` for the simulation, the constants in `data/db/build_rows.py` for the
-  import.
+  import, `WEIGHTS` in `data/db/risk_score.py` for the risk score.
 - **Estimates stay labeled** from the database to the screen (`*_source`, `confidence`).
 - **This repo is public.** No sponsor data, no real phone numbers and no keys in any commit.
 
@@ -316,8 +325,8 @@ AgentAction =
   | { type: "notify", to: "truck" | "supervisor", id: string, message: string }
 ```
 
-Matching: `match(state, policy) -> [Assignment]`, with `policy` = `"ours"` (risk-aware: people_need_help x urgency,
-nearby trucks first, re-match allowed) or `"nearest"` (comparison: nearest building that needs help, no re-plan).
+Matching: `match(state, policy) -> [Assignment]`, with `policy` = `"ours"` (risk-aware: the phase 3 priority, the fire deadline
+and travel time, re-match allowed) or `"nearest"` (comparison: nearest building that needs help, no re-plan).
 Both are pure functions over the same state, so the two runs are fair.
 
 Call data holds personal information. Keep it in memory only and delete it when the simulation is reset.
@@ -346,7 +355,7 @@ database:** it lists how each value is chosen and the known data problems.
 
 | Table or view | One row is | Key columns |
 |---|---|---|
-| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect` |
+| `buildings` (40,246) | One Vexcel structure in the Hollywood plan area, or a CoStar property with no structure | `id`, `lat`, `lng`, `footprint`, `height_m`, `floors`, `units`, `est_occupants`, `building_type`, each with a `*_source`; `costar_id`, `confidence`, `is_accessory`, `height_suspect`; `risk_score`, `people_at_risk`, `structure_factor` |
 | `costar_properties` (300) | One CoStar property, with CoStar's own values | `costar_id`, `name`, `address`, `floors`, `total_units`, `is_walkup`, `passenger_elevators`, `matterport_model_ids` |
 | `contacts` (436) | Site office or property manager of a CoStar property | `costar_id`, `role`, `company_name`, `phone`, `is_test_number` |
 | `buildings_geojson` | `buildings` plus `footprint_geojson` | Use this to draw outlines |

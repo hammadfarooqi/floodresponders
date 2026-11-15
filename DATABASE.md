@@ -96,6 +96,14 @@ Also: view `buildings_geojson` (all `buildings` columns plus `footprint_geojson`
 | `height_suspect` | Vexcel height is under 3 m and the structure is not accessory. We did not use that height | 3,390 |
 | `shares_costar_property` | The CoStar values of one property were given to 2 or more structures on a lot (problem 12) | rows of 37 properties |
 
+**Risk score** (rules and weights: "How the risk score is computed")
+
+| Column | Type | Meaning | Filled |
+|---|---|---|---|
+| `risk_score` | number | `people_at_risk` x `structure_factor`. Higher = send help first, when a fire threatens the building. Building data only: no fire position and no distance. 0 for sheds and garages. Null when the people inside are not known (commercial, office, retail, industrial). Highest: 186.9 | 38,841 |
+| `people_at_risk` | number | Estimated people who cannot leave without help. A one-unit home is 0.228. The sum over all rows is about 34,300 | 38,841 |
+| `structure_factor` | 0.5 to 2.0 | How likely the structure is to burn, on a relative scale. 1.0 is a structure with no trees near it, no close neighbors and no known protection. Values here run from 0.70 to 1.81, median 1.37 | 40,246 |
+
 ### `costar_properties` (300 rows)
 
 CoStar's own values for a whole property, before we split anything across structures.
@@ -202,6 +210,60 @@ per unit, the 3 m "suspect" limit, and the confidence weights. They are constant
 structure on that parcel that is not a shed or garage. Its units are split by footprint area x height, and the
 parts add up to the CoStar total. `shares_costar_property` is true when 2 or more structures got the values.
 
+## How the risk score is computed
+
+Code: `data/db/risk_score.py`. The import runs it on every row after the resolved values are filled.
+
+```
+risk_score       = people_at_risk x structure_factor
+people_at_risk   = units x 2.4 people x (1 - vacancy) x need rate
+structure_factor = 1 + the sum of the adjustments below, kept between 0.5 and 2.0
+```
+
+**The score uses building data only.** It has no fire position, no fire arrival time and no distance to a
+responder. It does not say which buildings a fire threatens (problem 29).
+
+People:
+
+| Rule | Value |
+|---|---|
+| Vacancy | 5% of units are empty |
+| Need rate: share of residents who cannot leave without help | 0.10 |
+| Need rate in senior housing | 0.5 (no row here is senior housing) |
+| 3 or more floors, more than 1 unit, and `is_walkup` is true or `passenger_elevators` is 0 | need rate x 1.5 |
+| 3 or 4 floors, more than 1 unit, and neither column is known | need rate x 1.07 |
+| `units` is `estimated` | at most 200 units are counted (problem 26) |
+| `units` is null, type `multi_family` | outline x floors / 85 m2, at least 2 units; 2 floors when `floors` is null |
+| `units` is null, type `institutional` or null | one home when outline x floors is 400 m2 or less; else as `multi_family` |
+| `units` is null, type `commercial`, `office`, `retail`, `industrial`, `hotel`, `land` | people not known: `people_at_risk` and `risk_score` are null |
+| `is_accessory` | 0 |
+
+The 1.07 comes from the CoStar rows: 12 of the 86 apartment properties here with 3 or 4 floors and a known answer
+have no elevator (14%), so 1 + 0.14 x 0.5. CoStar lists mostly large properties, so the true share for other
+buildings is probably higher.
+
+Structure (a missing value adds 0):
+
+| Column | Adjustment |
+|---|---|
+| `tree_density_zone1` | 0 to +0.30, by rank |
+| `tree_density_zone2` | 0 to +0.20, by rank |
+| Mean of `tree_density_zone3` and `zone4` | 0 to +0.20, by rank |
+| Mean of `building_density_zone1` and `zone2` | 0 to +0.10, by rank |
+| `parcel_hardscape_pct` | 0 to -0.10, by rank |
+| `roof_material` | `shingle` +0.05; `tile` or `metal` -0.05 |
+| `construction_material` | `wood_frame` +0.10; `reinforced_concrete` or `steel` -0.15 |
+| `has_sprinklers` is true | -0.10 |
+| `year_built` is 2008 or later | -0.05 |
+
+"By rank" means: the adjustment times the share of structures (sheds and garages left out) that have a lower
+value. The lowest value adds 0 and the highest adds the full adjustment. Rank is used because the unit of the tree
+columns is not clear (problem 28). `roof_condition` is not used (problem 27).
+
+**Every number in this section is a first guess, not a measurement.** They are in `WEIGHTS` at the top of
+`data/db/risk_score.py`. If you change one, change these tables and run the import again. Nobody has checked the
+score against a real fire yet.
+
 ## Known problems
 
 The numbers are fixed ids, so other files can point to them. New entries get the next free number, in the
@@ -256,6 +318,29 @@ section where they fit. That is why the numbers are not in order.
 28. **`tree_density_zone1` goes above 100** on 712 rows (highest 262). So it is not a plain percent, and we do not
     know the unit. Zones 2 to 4 stay under 100. Compare rows with each other, and do not read it as a share.
 
+### The risk score
+
+29. **`risk_score` does not know where the fire is.** A large apartment block far from any fire scores above a
+    small house next to the fire. Before you send a unit, keep only the buildings that the fire threatens (for
+    example by `fire_arrival_min`), then use `risk_score` to order them.
+30. **`risk_score` is null for 1,405 rows** (commercial, office, retail, industrial, and 3 CoStar rows with no
+    unit count and no outline). Null means "people not known", not "safe". Postgres puts nulls first in a descending sort: use
+    `order=risk_score.desc.nullslast`.
+31. **Most of the top of the ranking rests on estimated unit counts.** Of the 50 highest scores, 12 use a CoStar
+    unit count, 22 use an estimated count (20 of them sit at the 200-unit cap), and 16 are "institutional"
+    structures whose units we filled in from the outline. The institutional rows hold about a third of all
+    `people_at_risk`. Some of them are probably not housing (problem 8). County Assessor data would fix most of
+    this (problem 17).
+32. **The order at the top depends on the 200-unit cap.** With a cap of 100, only 17 of the top 50 stay in the top
+    50. The tree, roof and construction weights change 0 to 3 of the top 50 when moved by 50%, because
+    `people_at_risk` runs from 0.2 to 136 and `structure_factor` only from 0.70 to 1.81.
+33. **`structure_factor` is a relative scale with a median of 1.37, not 1.** Compare rows with each other. Do not
+    read it as a chance of burning.
+34. **One-unit homes all have `people_at_risk` = 0.228.** Among them only `structure_factor` changes the score
+    (0.20 to 0.41).
+35. **18 structures that are not sheds or garages score 0.** They stand on a lot with a CoStar property and got 0
+    of its units in the split (problem 12). The other structures on the lot hold the people.
+
 ### Differences from other parts of the project
 
 16. **The area is smaller than the demo area.** The demo pipeline on branch `hammad_1` uses the Hollywood plan
@@ -268,8 +353,8 @@ section where they fit. That is why the numbers are not in order.
     3.3 m. The difference is 3%.
 19. **Row ids are not the pipeline's ids.** `buildings.id` is a UUID made by the import. Join to pipeline output by
     location or by `costar_id`, not by id.
-20. **`fire_arrival_min`, risk scores and call data are not stored.** They depend on the scenario and belong to
-    the API.
+20. **`fire_arrival_min` and call data are not stored.** They depend on the scenario and belong to the API. The
+    stored `risk_score` uses building data only (problem 29).
 
 ### Vexcel API
 

@@ -23,6 +23,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_rows as br
+import risk_score as rs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VEXCEL_URL = "https://api.vexcelgroup.com/v2/property/extract"
@@ -200,6 +201,7 @@ def main():
     parcels = read_vexcel(args.cache)
     properties, contacts = read_costar(args.costar_kit, boundary)
     buildings = br.build(parcels, properties)
+    rs.score_rows(buildings, {p["costar_id"] for p in properties if p.get("is_senior_housing")})
 
     by_source = {}
     for b in buildings:
@@ -211,6 +213,10 @@ def main():
           f"accessory: {sum(1 for b in buildings if b['is_accessory'])}, "
           f"height suspect: {sum(1 for b in buildings if b['height_suspect'])}")
     print(f"  units source: {by_source}")
+    scored = [b["risk_score"] for b in buildings if b["risk_score"]]
+    print(f"  risk score: {len(scored)} above 0 (highest {max(scored, default=0)}), "
+          f"{sum(1 for b in buildings if b['risk_score'] == 0)} at 0, "
+          f"{sum(1 for b in buildings if b['risk_score'] is None)} not known")
     if args.dry_run:
         return
     if args.apply_schema:
