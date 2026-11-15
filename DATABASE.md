@@ -7,7 +7,8 @@ it, add it to this file in the same PR as your work. Put it under "Known problem
 you saw, how to see it again, and what to do about it. Never put sponsor data (CoStar, Vexcel, Matterport values,
 building names, addresses, phone numbers) in this file. The repo is public. Counts and percentages are fine.
 
-Owner of the database: Rasul. Schema: `data/db/schema.sql`. Import: `data/db/load_supabase.py`.
+Owner of the database: Rasul. Schema: `data/db/schema.sql`. Import: `data/db/load_supabase.py`, then
+`data/db/load_facilities.py`.
 
 ## What is in the database (loaded 2026-11-14)
 
@@ -19,6 +20,7 @@ Project `Responder0`, Postgres 17 with PostGIS. Area: the City of Los Angeles "H
 | `buildings` | 40,246 | One Vexcel structure, or one CoStar property that has no Vexcel structure (25 rows) |
 | `costar_properties` | 300 | One CoStar property (275 commercial, 25 homes), with CoStar's own values |
 | `contacts` | 436 | A site office or property manager of a CoStar property |
+| `facilities` | 212 | A care home, nursing home, hospital, housing project or school from a public list, linked to its building |
 
 Also: view `buildings_geojson` (all `buildings` columns plus `footprint_geojson`), and function
 `buildings_near(p_lat, p_lng, radius_m)`.
@@ -159,6 +161,55 @@ CoStar's own values for a whole property, before we split anything across struct
 | `phone` | text | 10 digits. **Fake**: every CoStar phone is a 555 number (problem 13). 192 site offices and 4 managers have one | 196 |
 | `is_test_number` | true/false | True only for rows we add by hand with our own phones. The import never sets it and never changes those rows | 436 |
 
+### `facilities` (212 rows)
+
+Places that hold many people who cannot leave without help, or many children. They come from five public lists
+(no key needed), cut to the plan area. Import: `data/db/load_facilities.py`, rules: `data/db/facilities.py`.
+
+| Column | Type | Meaning | Filled |
+|---|---|---|---|
+| `id` | uuid | Our id. Made from `source` and `source_id`, so it stays the same when the import runs again | 212 |
+| `source` | text | The list the row comes from: `cdss`, `cdph`, `lahd`, `hud` or `cde` (table below) | 212 |
+| `source_id` | text | The publisher's own id for the place | 212 |
+| `kind` | text | What the place is (table below) | 212 |
+| `name` | text | Name of the place | 212 |
+| `address` | text | Street address, as the publisher writes it | 212 |
+| `capacity` | whole number | How many people, beds, homes or students. Null means not known | 201 |
+| `capacity_unit` | text | What `capacity` counts: `people`, `beds`, `units` (homes) or `students` | 212 |
+| `lat`, `lng`, `location` | number, geography | The publisher's point for the address | 212 |
+| `source_status` | text | The publisher's status value, as sent (problem 46) | 185 |
+| `building_id` | uuid | The `buildings` row the place stands in (rule below). Null when no building is within 50 m | 212 |
+| `building_distance_m` | number | 0: the point is inside the building outline (143 rows). Above 0: meters from the point to the nearest outline (69 rows) | 212 |
+
+| `kind` | Rows | `capacity` (sum) | People there | From |
+|---|---|---|---|---|
+| `elderly_care` | 27 | 1,236 people | Day and night | `cdss`: residential care for the elderly |
+| `adult_care` | 7 | 203 people | Day and night | `cdss`: adult residential care, care for the chronically ill |
+| `children_home` | 2 | 12 people | Day and night | `cdss`: group home, transitional housing |
+| `nursing_home` | 11 | 1,171 beds | Day and night | `cdph`: skilled nursing, congregate living health facility |
+| `hospital` | 4 | 1,380 beds | Day and night | `cdph`: general acute care hospital |
+| `senior_housing` | 34 | 2,592 units | Day and night | `lahd` type `SENIORS` (16), `hud` client group `Elderly` (18) |
+| `special_needs_housing` | 10 | 673 units | Day and night | `lahd` type `SPECIAL NEEDS` |
+| `affordable_housing` | 35 | 1,567 units | Day and night | `lahd` and `hud`, all other types |
+| `child_care` | 49 | 2,998 people | Day only | `cdss`: day care center, infant center, school-age center |
+| `adult_day_care` | 6 | not known | Day only | `cdph`: adult day health care |
+| `school` | 27 | 13,718 students | Day only | `cde`: public schools that are open and not online-only |
+
+| `source` | Publisher and list | Rows kept |
+|---|---|---|
+| `cdss` | California Department of Social Services, Community Care Licensing facilities | 85 |
+| `cdph` | California Department of Public Health, licensed and certified healthcare facilities | 21 |
+| `lahd` | Los Angeles Housing Department, affordable housing projects | 52 |
+| `hud` | US Department of Housing and Urban Development, assisted multifamily properties | 27 |
+| `cde` | California Department of Education, public schools 2025-26 | 27 |
+
+The web addresses of the five lists are at the top of `data/db/load_facilities.py`.
+
+**Link to a building:** a point inside a building outline gets that building. Any other point gets the nearest
+building that is not a shed or garage, when its outline is within 50 m. The 50 m limit is an assumption
+(`LINK_MAX_M` in `data/db/facilities.py`). Of the 69 points outside an outline, 55 are under 5 m from one, and the
+farthest is 31.5 m.
+
 ### `buildings_geojson` and `buildings_near`
 
 - `buildings_geojson` has every `buildings` column plus `footprint_geojson`: the outline as a GeoJSON MultiPolygon,
@@ -179,6 +230,10 @@ curl "$SUPABASE_URL/rest/v1/buildings_geojson?select=id,lat,lng,height_m,units,f
 curl -X POST "$SUPABASE_URL/rest/v1/rpc/buildings_near" \
   -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
   -H "Content-Type: application/json" -d '{"p_lat": 34.1016, "p_lng": -118.3267, "radius_m": 500}'
+
+# care homes and nursing homes, with the building each one stands in
+curl "$SUPABASE_URL/rest/v1/facilities?select=kind,name,capacity,capacity_unit,buildings(id,lat,lng,risk_score)&kind=in.(elderly_care,nursing_home)" \
+  -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY"
 ```
 
 These are plain HTTPS calls, so any language works. The `supabase-py` client should work with the same URL and
@@ -202,6 +257,18 @@ python3 data/db/load_supabase.py --apply-schema     # run schema.sql first, then
   Supabase SQL editor.
 - Another area: `--boundary <file.geojson> --cache <new folder>`. Rows from the old area stay in the tables.
 - Checks: `ruff check data/db && pytest data/db`. CI does not run these (it only covers `api/` and `agent/`).
+
+The `facilities` table has its own import. Run it after `load_supabase.py`:
+
+```
+python3 data/db/load_facilities.py --dry-run        # build rows, print counts, send nothing
+python3 data/db/load_facilities.py                  # upload (a few seconds)
+```
+
+- It needs no kit and no key for the lists. It reads the Vexcel cache of `load_supabase.py` to find the building
+  of each place (`--vexcel-cache <folder>` when the cache is in another place).
+- The first run downloads the five lists (5 calls) into `data/cache/facilities/`. Delete that folder to fetch again.
+- The upload is an upsert on `id`. It never deletes a row (problem 47).
 
 ## How each resolved value is chosen
 
@@ -357,6 +424,8 @@ section where they fit. That is why the numbers are not in order.
 15. **CoStar marks no senior housing in this area.** `is_senior_housing` is false for every apartment property
     here. The Assessor does show care homes: 74 structures (448 units) are on lots described as
     `Homes For Aged & Others`. The risk score does not use this yet: it gives them the normal need rate.
+    The `facilities` table now lists them by name: 27 care homes for the elderly, 11 nursing homes and 34 senior
+    housing projects (problem 42).
 
 25. **383 Vexcel heights are below zero** (lowest -4.9 m). Each one is `height_suspect` or accessory, so it is never used as `height_m`
     for a home.
@@ -417,7 +486,27 @@ section where they fit. That is why the numbers are not in order.
 41. **Government lots are typed `institutional`.** 1,120 structures stand on lots of use type `Government`. They
     include schools and offices, and the tax record does not say which. People not known.
 
-### Differences from other parts of the project
+### Facilities
+
+42. **The risk score does not use `facilities` yet.** The 38 care homes for the elderly and nursing homes have a
+    capacity of 2,407 people. The 34 buildings they stand in have a `people_at_risk` sum under 90, because the
+    score treats them as normal homes, or has no people for them. 96 of the 212 rows are linked to a building with
+    a null `risk_score` (67 of the 82 schools and day care places, all 4 hospitals).
+43. **A place is linked to one building only.** A school or a hospital has several structures. The link goes to
+    the structure under the publisher's point, or to the nearest one. Use the link to find the lot, not to say
+    which structure holds the people.
+44. **One building can have 2 or more rows, and one place can be in 2 lists.** 15 buildings have 2 or 3 rows, for
+    example a school and its child care center, or a nursing home that is also a licensed care home. Do not add
+    `capacity` over rows before you look at `kind` and `source`.
+45. **`capacity` has four units, and three kinds are day only.** Read `capacity_unit`. A senior housing project
+    with 100 units is not 100 people. `school`, `child_care` and `adult_day_care` are empty at night.
+46. **`source_status` is not one vocabulary.** It is the publisher's value as sent. For `cdss` it is a number
+    whose meaning the list does not give: 83 of 85 rows have 3, one has 4 and one has 6. `hud` sends none. One
+    `lahd` row is `Development`: the project is not open yet.
+47. **The import never deletes.** A place that closes stays in the table until someone deletes the row.
+48. **The lists are not complete.** Private schools, senior housing with no public money, and child care in
+    family homes are not in them. We also left out family homes that take foster children and agency offices.
+
 ### Differences from other parts of the project
 
 16. **The area is smaller than the demo area.** The demo pipeline on branch `hammad_1` uses the Hollywood plan

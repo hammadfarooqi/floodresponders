@@ -128,10 +128,31 @@ create table if not exists contacts (
 );
 create index if not exists contacts_costar_id_idx on contacts (costar_id);
 
+-- One row per care home, hospital, housing project or school, from five public lists (data/db/load_facilities.py).
+create table if not exists facilities (
+  id                    uuid primary key,     -- made from source and source_id, so a reload keeps the same id
+  source                text not null,        -- 'cdss' | 'cdph' | 'lahd' | 'hud' | 'cde'
+  source_id             text not null,        -- the publisher's own id
+  kind                  text not null,        -- 'elderly_care', 'nursing_home', 'senior_housing', 'school', ...
+  name                  text,
+  address               text,
+  capacity              int,                  -- null = not known
+  capacity_unit         text not null,        -- 'people' | 'beds' | 'units' | 'students'
+  lat                   double precision not null,
+  lng                   double precision not null,
+  location              geography(point, 4326) not null,
+  source_status         text,                 -- the publisher's status value, as sent
+  building_id           uuid references buildings,    -- null = no building within 50 m
+  building_distance_m   numeric               -- 0 = the point is inside the building outline
+);
+create index if not exists facilities_location_idx on facilities using gist (location);
+create index if not exists facilities_building_id_idx on facilities (building_id);
+
 -- Row security is on and there are no rules. Only the secret key (server code) can read or write.
 alter table costar_properties enable row level security;
 alter table buildings enable row level security;
 alter table contacts enable row level security;
+alter table facilities enable row level security;
 
 -- The REST API returns geography columns as hex text. This view gives the footprint as GeoJSON.
 -- Drop it first: "b.*" is fixed when the view is made, so a new buildings column needs a new view.
