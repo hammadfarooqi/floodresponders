@@ -44,7 +44,7 @@ export interface DemoBuildingLite {
   id: string; lat: number; lng: number;
   people_est: number; people_need_help_est: number; fire_arrival_min: number | null;
   units?: number | null; height_m?: number;
-  costar?: null | { name: string; address: string; stories: number | null; manager: { company: string | null; phone: string | null } };
+  costar?: null | { id?: string; name: string; address: string; stories: number | null; manager: { company: string | null; phone: string | null } };
 }
 export interface StationLite { id: string; name: string; number: number; lat: number; lng: number; node: number }
 

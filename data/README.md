@@ -61,7 +61,13 @@ python3 data/pipeline/build_hollywood_map.py             # -> processed/building
 python3 data/pipeline/demo_buildings.py                  # -> demo/buildings.json (DemoBuilding + inputs)
 python3 data/pipeline/fire_timeline.py                   # -> demo/fire_timeline.json, fire_arrival_min, what-if evac areas
 python3.12 data/pipeline/roads_stations.py               # -> demo/roads.json, demo/stations.json
+python3 data/pipeline/interior_layouts.py                # -> demo/interiors_index.json, demo/interiors.json (about 2 min)
 ```
+
+`interior_layouts.py` is independent of the other steps. It reads the scan ids from Supabase (`costar_properties`,
+needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in `.env`) and the rooms, walls, doors and walking positions of each scan
+from the Matterport API. A scan is kept when it has a room labelled "Bedroom" that can be walked to: 350 of 1,058
+scans, on 166 of 294 properties (2026-11-14).
 
 `buildings.json` fields beyond CONTRACTS.md DemoBuilding: `inputs` = the raw value from every source (Vexcel type,
 roof, vegetation; Assessor use, units, bedrooms, floor area, year built; story estimate and its source), so a scorer

@@ -10,6 +10,8 @@ import { BUILDING_COLORS, style } from "../3d/mapStyle";
 import { Simulation, mins, type Proposal, type SimBuilding, type Truck } from "../../lib/sim/engine";
 import { DECLINE, STUCK, driverDeclines, followUps, seedHidden, tenantStuck, type Line } from "../../lib/sim/script";
 import { COLORS, SimRenderer, TRUCK_CSS, fmtT, loadSimLayers, n0, setHills, type Loaded } from "../sim/simMap";
+import InteriorPanel from "../interior/InteriorPanel";
+import { loadInteriorIndex, type PropertyInteriors } from "../interior/interiorData";
 
 const DURATION = 180;
 const VIEW = { center: [-118.327, 34.0965] as [number, number], zoom: 13.55, pitch: 35, bearing: 0 };
@@ -41,6 +43,7 @@ export default function ConsoleView() {
   const clock = useRef(0);
   const mode = useRef<Mode>("auto");
   const stats = useRef({ approved: 0, rejected: 0, edited: 0, auto: 0 });
+  const interiors = useRef(new Map<string, PropertyInteriors>());   // building id -> scanned apartments (Matterport)
 
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -54,6 +57,7 @@ export default function ConsoleView() {
   const [cmdMsg, setCmdMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
   const [hills, setHillsUi] = useState(false);
+  const [interiorOf, setInteriorOf] = useState<string | null>(null);   // building whose interior layout is open
   const refresh = () => setFrame(f => f + 1);
 
   // ---------- setup ----------
@@ -74,6 +78,10 @@ export default function ConsoleView() {
       m.on("mouseleave", "buildings", () => { m.getCanvas().style.cursor = ""; });
       start();
       setReady(true);
+      loadInteriorIndex().then(index => {
+        for (const b of d.buildings) { const p = b.costar?.id && index[b.costar.id]; if (p) interiors.current.set(b.id, p); }
+        refresh();
+      }).catch(err => console.error(err));
     }).catch(err => console.error(err));
     return () => { m.remove(); map.current = null; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -275,6 +283,7 @@ export default function ConsoleView() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+      if (interiorOf) { if (e.key === "Escape") setInteriorOf(null); return; }   // the layout panel is on top
       const top = pending.current[0];
       if (e.key === "a" && top) { approve(top); draw(); refresh(); }
       if (e.key === "r" && top) { reject(top); draw(); refresh(); }
@@ -394,6 +403,7 @@ export default function ConsoleView() {
           <div className="bcard">
             <button className="x" onClick={() => setSelBld(null)}>×</button>
             <b>{sb.label}</b>{sb.costar && <span className="pill">CoStar · manager phone</span>}
+            {interiors.current.has(sb.id) && <span className="pill green">INTERIOR SCAN</span>}
             <div className="grid">
               <span>Fire arrives</span><b>{fmtT(sb.fire)} ({sb.fire > t ? `in ${mins(sb.fire - t)}` : "burned"})</b>
               <span>Inside</span><b>{n0(sb.able + sb.need)}</b>
@@ -403,6 +413,8 @@ export default function ConsoleView() {
               <span>Unit</span><b>{assignedTo(sb.id).map(x => x.name).join(", ") || "—"}</b>
             </div>
             <div className="dim small">People estimate: units × 2.4 × 0.95; need help 10% (BUILDING_MODEL.md). A call to the manager replaces the estimate.</div>
+            {interiors.current.has(sb.id) &&
+              <button style={{ marginTop: 8, width: "100%" }} onClick={() => { setPlaying(false); setInteriorOf(sb.id); }}>See interior layout</button>}
           </div>)}
       </section>
 
@@ -466,7 +478,7 @@ export default function ConsoleView() {
               return (
                 <tr key={b.id} className={selBld === b.id ? "sel" : ""} onClick={() => setSelBld(b.id)}>
                   <td className="mono dim">{i + 1}</td>
-                  <td>{b.label}</td>
+                  <td>{b.label}{interiors.current.has(b.id) && <span className="pill green" title="Matterport interior scan">INT</span>}</td>
                   <td className="mono p">{n0(b.needKnown)}</td>
                   <td className="mono">{n0(b.able + b.need)}</td>
                   <td className={`mono ${left < 15 ? "r" : left < 40 ? "a" : ""}`}>{mins(left)}</td>
@@ -491,6 +503,9 @@ export default function ConsoleView() {
           <br />Simulation with labeled assumptions (see /sim); calls are scripted. Not a count of real lives.
         </div>
       </section>
+      {interiorOf && interiors.current.has(interiorOf) &&
+        <InteriorPanel title={s?.byId.get(interiorOf)?.label ?? "Building"} scans={interiors.current.get(interiorOf)!.scans}
+          onClose={() => setInteriorOf(null)} />}
     </div>
   );
 }
