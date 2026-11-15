@@ -7,7 +7,7 @@ import type { DemoBuildingLite, Simulation, StationLite } from "../../lib/sim/en
 
 export const FRONT_MIN = 10;
 export const ABLE_PER_DOT = 20;   // one green dot = 20 people who left on their own
-export const NEED_PER_DOT = 2;    // one purple dot = 2 people who needed help
+export const NEED_PER_DOT = 1;    // one purple dot = 1 person who needed help
 export const WALK_M_PER_MIN = { able: 80, need: 30 };  // walking speed along the streets (assumption)
 export const COLORS = { able: "#22c55e", need: "#c084fc", trapped: "#ef4444", truck: "#f97316", onscene: "#16a34a", proposal: "#38bdf8" };
 
@@ -57,6 +57,7 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
   const empty = { type: "FeatureCollection" as const, features: [] };
   m.addSource("sel", { type: "geojson", data: empty });
   m.addSource("calls", { type: "geojson", data: empty });
+  m.addSource("calls_coming", { type: "geojson", data: empty });
   if (!m.hasImage("phone")) m.addImage("phone", phoneIcon(), { pixelRatio: 2 });
   m.addSource("walkers", { type: "geojson", data: empty });
   m.addSource("routes", { type: "geojson", data: empty });
@@ -75,6 +76,10 @@ export async function loadSimLayers(m: maplibregl.Map): Promise<Loaded> {
     paint: { "circle-radius": ["match", ["get", "k"], "need", 3.6, 3],
              "circle-color": ["match", ["get", "k"], "need", COLORS.need, COLORS.able], "circle-opacity": ["get", "o"],
              "circle-stroke-color": "#0b0b0b", "circle-stroke-width": 0.6, "circle-stroke-opacity": ["get", "o"] } });
+  m.addLayer({ id: "calls_coming", type: "symbol", source: "calls_coming",
+    layout: { "icon-image": "phone", "icon-size": 1.3, "icon-anchor": "bottom", "icon-offset": [0, -6],
+              "icon-allow-overlap": true, "icon-ignore-placement": true },
+    paint: { "icon-opacity": 0.85 } });
   m.addLayer({ id: "calls", type: "symbol", source: "calls",
     layout: { "icon-image": "phone", "icon-size": 1.3, "icon-anchor": "bottom", "icon-offset": [0, -6],
               "icon-allow-overlap": true, "icon-ignore-placement": true },
@@ -228,14 +233,16 @@ export class SimRenderer {
     }
     (m.getSource("routes") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: routes });
     // buildings that called 911 and still wait for a truck: a phone that shakes
-    const ring = s.ringing();
-    const key = ring.map(c => c.id).join(",");
+    // shaking = waiting for a truck; still = a truck is on the way; gone = the truck arrived
+    const ring = s.ringing(), coming = s.answeredWaiting();
+    const key = ring.map(c => c.id).join(",") + "|" + coming.map(c => c.id).join(",");
     if (key !== this.ringKey) {
       this.ringKey = key;
-      (m.getSource("calls") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: ring.map(c => {
-        const b = s.byId.get(c.building)!;
-        return { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [b.lng, b.lat] } };
-      }) });
+      const pt = (id: string) => { const b = s.byId.get(id)!; return { type: "Point" as const, coordinates: [b.lng, b.lat] }; };
+      (m.getSource("calls") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection",
+        features: ring.map(c => ({ type: "Feature" as const, properties: {}, geometry: pt(c.building) })) });
+      (m.getSource("calls_coming") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection",
+        features: coming.map(c => ({ type: "Feature" as const, properties: {}, geometry: pt(c.building) })) });
     }
     const ph = Math.floor(now / 70) % 4;
     if (m.getLayer("calls")) m.setPaintProperty("calls", "icon-translate", [[-2, 0], [2, 0], [-1, 0], [1, 0]][ph] as [number, number]);

@@ -254,6 +254,13 @@ export class Simulation {
     if (this.callPtr < 0) this.callPtr = this.calls.length;
   }
 
+  /** Calls whose truck is on the way but has not arrived yet (the phone stays, without shaking). */
+  answeredWaiting(): Call[] {
+    return this.calls.filter(c => c.t_dispatch !== null && c.truck !== null && (() => {
+      const tr = this.trucks.find(x => x.id === c.truck)!, b = this.byId.get(c.building)!;
+      return tr.building === c.building && tr.status === "en_route" && !b.burned && b.need >= 0.5; })());
+  }
+
   /** Calls whose building still waits: rung, no truck yet, building not burned and not empty. */
   ringing(): Call[] {
     return this.calls.filter(c => c.t_call <= this.t && c.t_dispatch === null && (() => {

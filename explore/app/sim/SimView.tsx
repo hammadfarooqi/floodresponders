@@ -39,6 +39,7 @@ export default function SimView() {
   const [results, setResults] = useState<Partial<Record<Policy, Counts>>>({});
   const [showAssumptions, setShowAssumptions] = useState(false);
   const [hills, setHillsUi] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(true);
 
   // ---------- load data + map ----------
   useEffect(() => {
@@ -238,7 +239,8 @@ export default function SimView() {
       </div>
 
       {/* legend */}
-      <div className="card legend">
+      <div className={`card legend ${legendOpen ? "" : "closed"}`}>
+        <button className="lgt" onClick={() => setLegendOpen(v => !v)}>{legendOpen ? "hide legend ▾" : "legend ▴"}</button>
         <div className="lh">Buildings</div>
         <div><i className="sq" style={{ background: BUILDING_COLORS.occupied }} />people still inside</div>
         <div><i className="sq" style={{ background: BUILDING_COLORS.empty }} />everyone out</div>
@@ -249,7 +251,7 @@ export default function SimView() {
         <div><i className="dot" style={{ background: COLORS.need }} />needed help, slow (1 dot = {NEED_PER_DOT})</div>
         <div><span style={{ marginRight: 6 }}>🚒</span>fire truck (station number) · ladder up = working at a building</div>
         <div><span style={{ marginRight: 6, letterSpacing: 1 }}>- - -</span>truck driving to that building</div>
-        <div><span style={{ marginRight: 6 }}>📞</span>called 911, waiting for a truck</div>
+        <div><span style={{ marginRight: 6 }}>📞</span>called 911: shaking = waiting, still = truck on the way</div>
       </div>
 
       {/* comparison */}
@@ -328,7 +330,11 @@ const CSS = `
 .ev{padding:3px 0;border-bottom:1px solid #ffffff0d;color:#d4d4d8}
 .ev .tm{color:#71717a;font-variant-numeric:tabular-nums;margin-right:6px}
 .ev.reassign{color:#fde68a}.ev.withdraw,.ev.unassign{color:#fca5a5}.ev.call{color:#c4b5fd}.ev.arrive{color:#86efac}
-.legend{left:64px;bottom:12px;padding:8px 10px;font-size:11.5px;display:flex;flex-direction:column;gap:3px;color:#f4f4f5}
+.legend{left:64px;bottom:12px;padding:6px 10px 8px;font-size:11px;display:grid;grid-template-columns:auto auto;column-gap:16px;row-gap:2px;color:#f4f4f5;max-width:560px}
+.legend .lh,.legend .lgt{grid-column:1/-1}
+.legend.closed{display:block;padding:4px 8px}
+.legend.closed>*:not(.lgt){display:none}
+.lgt{justify-self:end;background:none;border:0;color:#a1a1aa;font:inherit;font-size:10.5px;cursor:pointer;padding:0}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:-1px}
 .sq{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;outline:1px solid #ffffff40}
 .lh{font-weight:700;color:#a1a1aa;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
