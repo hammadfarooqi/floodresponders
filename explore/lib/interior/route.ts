@@ -6,7 +6,8 @@
 export interface Room { labels: string[]; polygon: [number, number][]; center: [number, number] | null }
 export interface Opening { type: "doorway" | "window"; label: string | null; a: [number, number]; b: [number, number]; exterior: boolean }
 export interface Floor { label: string; rooms: Room[]; walls: [number, number, number, number][]; openings: Opening[] }
-export interface Position { x: number; y: number; floor: number; room: number | null; next: number[] }
+/** id = the Matterport id of the position (a "sweep" in the 3D tour). z = height of the floor under it. */
+export interface Position { id: string; x: number; y: number; z: number; floor: number; room: number | null; next: number[] }
 export interface Layout { id: string; name: string; url: string; floors: Floor[]; positions: Position[] }
 
 /** Rooms where a person is most likely to be when a fire starts. The route visits these. */
@@ -106,4 +107,41 @@ export function searchRoute(l: Layout, entry: number): SearchRoute {
     at = pos;
   }
   return { entry, stops, unreachable: left, meters: round(total) };
+}
+
+// ---------------------------------------------------------------- the route inside the 3D tour
+// The Matterport viewer has y up, and its z is the plan's y reversed. Checked on a real scan: the viewer's
+// position ("sweep") ids are the layout's position ids, and a line drawn with this mapping lies on the floor.
+export interface Point3 { x: number; y: number; z: number }
+export const toViewer = (p: { x: number; y: number; z: number }): Point3 => ({ x: p.x, y: p.z, z: 0 - p.y });
+
+/** One camera move of the walk: go to this position and face this way. */
+export interface WalkStep {
+  sweep: string;             // the Matterport id of the position
+  yawDeg: number | null;     // face along the move (first step: along the next move); null = keep the view
+  meters: number;            // length of the move
+  stop: number | null;       // number of the stop that this move reaches (1 = first bedroom), else null
+}
+export interface Route3d {
+  legs: Point3[][];          // one line for each stop, on the floor
+  stops: Point3[];           // floor point of each stop, in route order
+  walk: WalkStep[];          // the camera moves along the whole route; walk[0] is the start
+}
+
+// A camera with yaw 0 looks toward -z; a positive yaw turns it to the left (toward -x).
+const yawFrom = (a: Point3, b: Point3) => Math.round(Math.atan2(-(b.x - a.x), -(b.z - a.z)) * 180 / Math.PI) || 0;
+
+export function routeIn3d(l: Layout, route: SearchRoute): Route3d {
+  const at = (i: number) => toViewer(l.positions[i]);
+  const legs = route.stops.filter(s => s.path.length > 1).map(s => s.path.map(at));
+  const walk: WalkStep[] = [{
+    sweep: l.positions[route.entry].id, yawDeg: legs.length ? yawFrom(legs[0][0], legs[0][1]) : null, meters: 0,
+    stop: route.stops[0]?.path.length === 1 ? 1 : null,
+  }];
+  route.stops.forEach((s, n) => s.path.slice(1).forEach((to, k) => {
+    const a = at(s.path[k]), b = at(to);
+    walk.push({ sweep: l.positions[to].id, yawDeg: yawFrom(a, b), meters: round(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z)),
+      stop: k === s.path.length - 2 ? n + 1 : null });
+  }));
+  return { legs, stops: route.stops.map(s => at(s.position)), walk };
 }

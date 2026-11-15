@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { TARGET_LABEL, pickEntry, searchRoute, type Layout } from "../../lib/interior/route";
 import { loadLayouts, type ScanSummary } from "./interiorData";
+import Tour3D, { tour3dAvailable } from "./Tour3D";
 
 const GREEN = "#22c55e";
 const WHY = {
@@ -22,8 +23,10 @@ export default function InteriorPanel({ title, scans, onClose }: { title: string
   const [floor, setFloor] = useState<number | null>(null);   // null = the floor of the start
   const [picked, setPicked] = useState<number | null>(null);
   const [tour, setTour] = useState(false);
+  const [canDraw3d, setCanDraw3d] = useState(false);   // the viewer bundle and an SDK key are set up on this machine
 
   useEffect(() => { loadLayouts().then(setLayouts).catch(e => setError(String(e))); }, []);
+  useEffect(() => { tour3dAvailable().then(setCanDraw3d); }, []);
   useEffect(() => { setScanId(scans[0]?.id); }, [scans]);
   const layout = scanId && layouts ? layouts[scanId] : undefined;
   const plan = useMemo(() => {
@@ -79,7 +82,11 @@ export default function InteriorPanel({ title, scans, onClose }: { title: string
           {!error && !layouts && <div className="il-msg">Loading layouts…</div>}
           {layouts && !layout && <div className="il-msg">No layout for this scan. Run data/pipeline/interior_layouts.py again.</div>}
           {layout && plan && (tour
-            ? <iframe src={`${layout.url}&play=1&qs=1&brand=0`} title="Matterport 3D tour" allow="fullscreen; xr-spatial-tracking" allowFullScreen />
+            ? canDraw3d ? <Tour3D layout={layout} route={plan.route} />
+              : <>
+                <iframe src={`${layout.url}&play=1&qs=1&brand=0`} title="Matterport 3D tour" allow="fullscreen; xr-spatial-tracking" allowFullScreen />
+                <div className="il-legend">Plain tour, with no route line. To draw the route here, run explore/scripts/get_matterport_bundle.sh.</div>
+              </>
             : <>
               {layout.floors.length > 1 && <div className="il-floors">{layout.floors.map((f, i) =>
                 <button key={i} className={i === shown ? "on" : ""} onClick={() => setFloor(i)}>{f.label}</button>)}</div>}
