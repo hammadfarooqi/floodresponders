@@ -238,6 +238,7 @@ export default function SimView() {
             <tr><td>Evacuation order</td><td>at 0:00 for everyone the fire will reach</td></tr>
             <tr><td>Can leave alone</td><td>{Math.round(cfg.self_evac_rate_per_min * 100)}% of those still inside leave each minute</td></tr>
             <tr><td>Need help, alone</td><td>{Math.round(cfg.need_alone_rate_per_min * 100)}% per minute get out without a truck (results depend strongly on this)</td></tr>
+            {cfg.leave_by_risk && <tr><td>Slower in risky buildings</td><td>both rates above change by the building&apos;s rank in Rasul&apos;s static risk score: lowest risk {cfg.leave_fast_low}× faster, middle as above, highest {cfg.leave_slow_high}× slower (both runs; results depend strongly on this)</td></tr>}
             <tr><td>Truck crew</td><td>brings out {cfg.assisted_people_per_min} people per minute</td></tr>
             <tr><td>Truck speed</td><td>{cfg.truck_speed_kmh} km/h on OSM streets, no traffic, one-way rules ignored; burned streets closed</td></tr>
             <tr><td>Crews pull out</td><td>{cfg.withdraw_before_fire_min} min before the fire reaches a building (both runs)</td></tr>

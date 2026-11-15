@@ -31,6 +31,12 @@ export interface SimConfig {
                                      // 10% estimate. A call that reports the real count replaces either.
   risk_structure: boolean;           // multiply by Rasul's structure_factor (0.5-2.0: trees, neighbors, construction)
   threat_boost: number;              // threat = 1 + threat_boost x urgency: the fire can raise a score up to (1 + this) times
+  // People in high-risk buildings leave on their own more slowly (both runs; the true simulated people). By the rank
+  // of Rasul's static risk_score: lowest rank leaves leave_fast_low x faster, the middle at the base rates, the
+  // highest leave_slow_high x slower (smooth in between). Buildings with no score keep the base rates.
+  leave_by_risk: boolean;
+  leave_fast_low: number;
+  leave_slow_high: number;
   match_rule: "rate" | "fleet" | "priority";  // AI: "rate" = people helped per minute of truck time (greedy);
                                               // "fleet" = whole-fleet assignment by people a crew can help (CONTRACTS phase 4, #80);
                                               // "priority" = most urgent first
@@ -60,6 +66,9 @@ export const DEFAULT_CONFIG: SimConfig = {
   risk_people: "rasul",
   risk_structure: false,
   threat_boost: 9,
+  leave_by_risk: true,
+  leave_fast_low: 1.5,
+  leave_slow_high: 3,
   match_rule: "rate",
   duration_min: 180,
   call_share: 0.7,
@@ -110,6 +119,7 @@ export interface SimBuilding {
   structure: number;   // Rasul's structure_factor (1 when unknown)
   riskStatic: number | null;  // Rasul's risk_score (null = no score: people not known or no match)
   riskSource: string;  // where the people count comes from: CoStar, Assessor, estimate, call
+  leaveF: number;      // leaving-rate factor from the static risk rank (1 = base rates; < 1 = slower)
   hidden: number;      // people needing help that only a call reveals
   stuck: number;       // people who cannot leave alone at all (a call reports them)
   evacuated: number; evacuatedNeed: number; trapped: number; trappedNeed: number;
@@ -190,10 +200,20 @@ export class Simulation {
           rankScale: this.cfg.risk_people === "rasul" && b.risk?.people != null && need > 0 ? b.risk.people / need : 1,
           structure: b.risk?.structure ?? 1, riskStatic: b.risk?.score ?? null,
           riskSource: this.cfg.risk_people === "rasul" && b.risk?.people != null ? b.risk.source : "estimate",
+          leaveF: 1,
           evacuated: 0, evacuatedNeed: 0, trapped: 0, trappedNeed: 0, burned: false, safeAble: 0, safeNeed: 0,
         };
       });
     this.byId = new Map(this.buildings.map(b => [b.id, b]));
+    if (this.cfg.leave_by_risk) {
+      // rank r from 0 (lowest static risk) to 1 (highest); factor fast^(1-2r) below the middle, (1/slow)^(2r-1) above
+      const scored = this.buildings.filter(b => b.riskStatic != null).sort((a, b) => a.riskStatic! - b.riskStatic! || (a.id < b.id ? -1 : 1));
+      const n = scored.length;
+      scored.forEach((b, i) => {
+        const r = n > 1 ? i / (n - 1) : 0.5;
+        b.leaveF = r < 0.5 ? Math.pow(this.cfg.leave_fast_low, 1 - 2 * r) : Math.pow(1 / this.cfg.leave_slow_high, 2 * r - 1);
+      });
+    }
     this.trucks = data.stations.map(st => ({
       id: `E${st.number}`, name: `Engine ${st.number}`, station: st.number, status: "idle" as TruckStatus,
       lng: this.g.lng[st.node], lat: this.g.lat[st.node],
@@ -370,8 +390,7 @@ export class Simulation {
 
   private people(t0: number, t1: number) {
     const crews = this.onScene();
-    const selfFrac = 1 - Math.exp(-this.cfg.self_evac_rate_per_min * DT);
-    const aloneFrac = 1 - Math.exp(-this.cfg.need_alone_rate_per_min * DT);
+    const selfRate = this.cfg.self_evac_rate_per_min * DT, aloneRate = this.cfg.need_alone_rate_per_min * DT;
     for (const b of this.buildings) {
       if (b.burned) continue;
       const before = Math.round(b.able + b.need);
@@ -382,9 +401,10 @@ export class Simulation {
         continue;
       }
       // people only start walking out while they can still get ahead of the fire; after that they stay (trapped)
-      const a = t1 <= b.safeAble ? b.able * selfFrac : 0;
+      // leaving alone, slowed (or sped up) by the building's static risk rank
+      const a = t1 <= b.safeAble ? b.able * (1 - Math.exp(-selfRate * b.leaveF)) : 0;
       const canGo = t1 <= b.safeNeed;
-      let h = canGo ? Math.max(0, b.need - b.stuck) * aloneFrac : 0;
+      let h = canGo ? Math.max(0, b.need - b.stuck) * (1 - Math.exp(-aloneRate * b.leaveF)) : 0;
       const k = crews.get(b.idx) ?? 0;
       if (k > 0 && canGo) h += Math.min(b.need - h, k * this.cfg.assisted_people_per_min * DT);
       b.able -= a; b.need -= h; b.evacuated += a + h; b.evacuatedNeed += h;

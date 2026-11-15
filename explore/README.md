@@ -24,9 +24,15 @@ same in both runs. Data: `python3 data/pipeline/join_risk.py` joins Supabase to 
 centroid within 10 m; 1,488 of 1,527 sim buildings get a score) and writes `data/demo/risk_join.json`. The engine
 method `riskScores()` lists all buildings by risk (meant as a tool for the deep agent).
 
-Result with default assumptions (fire stops at Hollywood Blvd): today's 911 dispatch 310 trapped, Roll Call 67
-(78% fewer). Across assumption changes (seeds, truck 20/45 km/h, crew speed, call share 40%, 10 call-takers, leaving
-rate) today traps 118–434 and Roll Call 39–105. Ranking choices on the default run (Roll Call trapped): our 10%
+**People leave more slowly from high-risk buildings** (`leave_by_risk`, both runs): the two leaving rates are
+multiplied by a factor from the building's rank in Rasul's static `risk_score`: lowest rank 1.5x faster, middle 1x,
+highest 3x slower (`leave_fast_low`, `leave_slow_high`). Buildings with no score keep the base rates.
+
+Result with default assumptions (fire stops at Hollywood Blvd): today's 911 dispatch 764 trapped, Roll Call 277
+(64% fewer). 174 of them could have left alone (trucks do not help them), the same in both runs. With
+`leave_slow_high=1.5`: 419 vs 94; with `leave_by_risk=false`: 310 vs 67. The numbers below this line were measured
+with `leave_by_risk=false`. Across assumption changes (seeds, truck 20/45 km/h, crew speed, call share 40%, 10 call-takers, leaving
+rate, slow-down 1.5–3x) today traps 419–909 and Roll Call 94–407. Ranking choices on the default run (Roll Call trapped): our 10%
 estimate × urgency 52, Rasul's people × urgency 60, Rasul's people × threat k=9 (default) 67, k=1 (max 2×) 100.
 In this sim the true people count IS our 10% estimate, so Rasul's counts cannot look better here; that is a limit of
 the test, not proof his counts are worse. Simulated; not a count of real lives.

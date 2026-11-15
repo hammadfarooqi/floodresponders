@@ -76,10 +76,10 @@ Two calls in the demo show this:
 
 | Same fire, people, calls and trucks | Today (911 calls) | Roll Call |
 |---|---|---|
-| People trapped | 310 | 67 |
-| ... of them people who needed help | 299 | 55 |
+| People trapped | 764 | 277 |
+| ... of them people who needed help | 591 | 104 |
 
-"In this simulation, Roll Call leaves about **78% fewer people trapped**." While the run plays, point at the red
+"In this simulation, Roll Call leaves about **64% fewer people trapped**." While the run plays, point at the red
 phones: those are people waiting in the 911 queue. In the Roll Call run, trucks are often already on the way
 before anyone calls.
 
@@ -89,7 +89,7 @@ before anyone calls.
 - **Every assumption is on screen** (click "show assumptions"). Nothing is hidden in the code.
 - **We tried changing each assumption.** Fewer or more people calling 911 (40% to 100%), 2 to 10 call-takers,
   slower or faster crews, trucks at 20 or 45 km/h, people leaving more slowly, other random seeds. Today's dispatch
-  traps 118 to 434 people; Roll Call traps 39 to 105. **Roll Call is better in every case.** The exact numbers
+  traps 419 to 909 people; Roll Call traps 94 to 407. **Roll Call is better in every case.** The exact numbers
   change a lot; the direction does not.
 - **We say what it is not.** This is a simulation with assumptions. It is not a count of real lives saved, and
   the phone calls in the demo are scripted. The fire model ignores slope, wind gusts and embers.
