@@ -86,8 +86,16 @@ create table if not exists buildings (
   is_accessory          boolean not null default false,   -- shed, garage, carport
   height_suspect        boolean not null default false,   -- Vexcel height under 3 m and not accessory
   shares_costar_property boolean not null default false,  -- CoStar values were given to 2+ structures
-  confidence            numeric                           -- 0 to 1
+  confidence            numeric,                          -- 0 to 1
+
+  -- Risk score (data/db/risk_score.py). Building data only: no fire position and no distance to a responder.
+  risk_score            numeric,              -- people_at_risk x structure_factor; null = people not known
+  people_at_risk        numeric,              -- estimated people who cannot leave without help
+  structure_factor      numeric               -- 0.5 to 2.0; higher = more likely to burn
 );
+alter table buildings add column if not exists risk_score numeric;
+alter table buildings add column if not exists people_at_risk numeric;
+alter table buildings add column if not exists structure_factor numeric;
 create index if not exists buildings_location_idx on buildings using gist (location);
 create index if not exists buildings_footprint_idx on buildings using gist (footprint);
 create index if not exists buildings_costar_id_idx on buildings (costar_id);
@@ -109,7 +117,9 @@ alter table buildings enable row level security;
 alter table contacts enable row level security;
 
 -- The REST API returns geography columns as hex text. This view gives the footprint as GeoJSON.
-create or replace view buildings_geojson with (security_invoker = true) as
+-- Drop it first: "b.*" is fixed when the view is made, so a new buildings column needs a new view.
+drop view if exists buildings_geojson;
+create view buildings_geojson with (security_invoker = true) as
 select b.*, st_asgeojson(b.footprint)::jsonb as footprint_geojson
 from buildings b;
 
