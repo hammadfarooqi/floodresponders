@@ -218,4 +218,49 @@ as $$
   order by st_distance(b.location, st_setsrid(st_makepoint(p_lng, p_lat), 4326)::geography)
 $$;
 
+-- The risk score of every building for one fire origin, highest first. The same rule as data/db/fire_risk.py:
+--   fire_risk_score = risk_score x fire_factor,  fire_factor = 1 + boost x 0.5 ^ (effective distance / half distance)
+-- p_wind_from_deg: compass direction the wind comes from (0 = north, 90 = east). Null = no wind, a circle.
+-- The three weights are first guesses. Their defaults must equal WEIGHTS in fire_risk.py (a test checks this).
+-- REST: POST /rest/v1/rpc/buildings_fire_risk  {"p_origin_lat": 34.11, "p_origin_lng": -118.35, "p_wind_from_deg": 315}
+-- The REST API returns at most 1,000 rows for each request, whatever p_limit is.
+create or replace function buildings_fire_risk(
+  p_origin_lat      double precision,
+  p_origin_lng      double precision,
+  p_wind_from_deg   double precision default null,
+  p_limit           integer default 1000,
+  p_boost           double precision default 1.0,
+  p_half_distance_m double precision default 1000.0,
+  p_wind_stretch    double precision default 0.3)
+returns table (
+  id uuid, lat double precision, lng double precision, assessor_address text, building_type text, units integer,
+  units_source text, confidence numeric, people_at_risk numeric, structure_factor numeric, risk_score numeric,
+  fire_distance_m numeric, fire_factor numeric, fire_risk_score numeric)
+language sql stable
+set search_path = public, extensions
+as $$
+  with offsets as (
+    select b.id,
+           (b.lng - p_origin_lng) * cos(radians(p_origin_lat)) * 111320 as east_m,
+           (b.lat - p_origin_lat) * 110540 as north_m
+    from buildings b
+  ), factors as (
+    select o.id,
+           sqrt(o.east_m ^ 2 + o.north_m ^ 2) as distance_m,
+           1 + p_boost * power(0.5, (
+             sqrt(o.east_m ^ 2 + o.north_m ^ 2)
+             + case when p_wind_from_deg is null then 0
+                    else p_wind_stretch * (o.east_m * sin(radians(p_wind_from_deg))
+                                           + o.north_m * cos(radians(p_wind_from_deg))) end
+           ) / p_half_distance_m) as factor
+    from offsets o
+  )
+  select b.id, b.lat, b.lng, b.assessor_address, b.building_type, b.units, b.units_source, b.confidence,
+         b.people_at_risk, b.structure_factor, b.risk_score,
+         round(f.distance_m::numeric, 1), round(f.factor::numeric, 3), round(b.risk_score * f.factor::numeric, 3)
+  from buildings b join factors f on f.id = b.id
+  order by b.risk_score * f.factor::numeric desc nulls last, b.id
+  limit p_limit
+$$;
+
 notify pgrst, 'reload schema';

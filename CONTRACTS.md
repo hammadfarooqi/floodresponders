@@ -16,7 +16,9 @@ matches fire trucks to buildings before the fire reaches them, and keeps that ma
    building supervisors ("a tenant is stuck"), re-matches on its own, then calls everyone affected with the change.
 4. **On arrival:** show the responder the building (Matterport stairs and windows, where we have them).
 
-**Scope:** fire only, Los Angeles only (Hollywood). No floods, no Houston, no disaster, origin or severity controls.
+**Scope:** fire only, Los Angeles only (Hollywood). No floods, no Houston, no disaster or severity controls.
+One origin control exists: the `/risk` page has a "Create fire origin" button that ranks buildings for an origin a
+person sets (added 2026-11-14, decided by Rasul). The demo run on `/sim` and `/console` keeps its one fixed fire.
 
 ## Demo (plan v2)
 
@@ -129,6 +131,12 @@ or CoStar while it runs.
   replaces the earlier rule that roof, tree and construction fields are not part of the priority.
 - **It is computed once, in the import, and stored** in `buildings` (`risk_score`, `people_at_risk`,
   `structure_factor`). Code: `data/db/risk_score.py`. It does not change during a run.
+- **A fire origin can raise the score: `fire_risk_score` = `risk_score` x `fire_factor`.** `fire_factor` is 2 at
+  the origin and goes down toward 1 with distance (the added part halves every 1,000 m). With a wind direction
+  the reach is a slight oval, longer downwind. The fire raises a score and never replaces it: 0 stays 0, and a
+  high `risk_score` farther away can stay above a low one at the fire. Code: `data/db/fire_risk.py` and the
+  database function `buildings_fire_risk(p_origin_lat, p_origin_lng, p_wind_from_deg)`. It is computed for each
+  call and not stored. It is a rule of thumb, not a fire model, and it is not `fire_arrival_min`.
 - **Every weight is in `WEIGHTS`** in that file and is listed in `DATABASE.md`. All are first guesses that nobody
   has checked against a real fire yet. Do not put a second copy of a weight in other code.
 - **Missing values.** A value that is not known takes the typical value for the building type; it never makes
@@ -363,6 +371,7 @@ database:** it lists how each value is chosen and the known data problems.
 | `facilities` (212) | One care home, nursing home, hospital, senior or affordable housing project, or school, from public lists | `kind`, `name`, `address`, `capacity`, `capacity_unit`, `lat`, `lng`, `building_id` (link to `buildings.id`), `building_distance_m` |
 | `buildings_geojson` | `buildings` plus `footprint_geojson` | Use this to draw outlines |
 | `buildings_near(p_lat, p_lng, radius_m)` | Function: buildings near a point, nearest first | |
+| `buildings_fire_risk(p_origin_lat, p_origin_lng, p_wind_from_deg)` | Function: every building with its score for one fire origin, highest first (at most 1,000 rows for each call) | `fire_distance_m`, `fire_factor`, `fire_risk_score`, plus `id`, `lat`, `lng`, `risk_score`, `people_at_risk`, `units` |
 
 Row security is on with no rules: only `SUPABASE_SECRET_KEY` (server code) can read or write.
 `DemoBuilding` above is still the shape the API serves. `DATABASE.md` lists where the database differs from it
