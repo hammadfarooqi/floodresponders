@@ -44,7 +44,9 @@ export interface SimConfig {
   duration_min: number;
   // 911 calls (both runs get the same calls; only "calls" depends on them to send a truck)
   call_share: number;               // share of buildings with people who need help where someone calls 911
-  call_lead_min: [number, number];  // they call this many minutes before the fire reaches them (uniform)
+  call_lead_min: [number, number];  // (used only when call_after_start_min is null) call this long before the fire arrives
+  call_after_start_min: [number, number] | null;  // they call this many minutes after the fire starts and the
+                                    // evacuation order goes out (uniform), but before the fire reaches them
   call_takers: number;              // 911 call-takers working these calls
   call_handle_min: number;          // minutes to take one call
   seed: number;
@@ -75,6 +77,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   duration_min: 180,
   call_share: 0.7,
   call_lead_min: [10, 60],
+  call_after_start_min: [1, 15],
   call_takers: 4,
   call_handle_min: 2.5,
   seed: 7,
@@ -272,8 +275,10 @@ export class Simulation {
     const r = rng(this.cfg.seed), [lo, hi] = this.cfg.call_lead_min;
     const raw: { b: SimBuilding; t: number }[] = [];
     for (const b of this.buildings) {
-      const calls = r() < this.cfg.call_share, lead = lo + (hi - lo) * r();
-      if (b.need >= 0.5 && calls) raw.push({ b, t: Math.max(0.5, b.fire - lead) });
+      const calls = r() < this.cfg.call_share, u = r(), lead = lo + (hi - lo) * u;
+      const w = this.cfg.call_after_start_min;
+      const t = w ? Math.min(w[0] + (w[1] - w[0]) * u, b.fire - 1) : b.fire - lead;
+      if (b.need >= 0.5 && calls) raw.push({ b, t: Math.max(0.5, t) });
     }
     raw.sort((a, b) => a.t - b.t || (a.b.id < b.b.id ? -1 : 1));
     const free = new Array(Math.max(1, this.cfg.call_takers)).fill(0);

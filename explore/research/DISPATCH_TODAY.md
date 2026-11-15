@@ -54,7 +54,7 @@ Design rules that follow:
   and calling again puts you at the back). During wildfires, call volume can rise 4–5 times (Utah, 2021 season).
 - **Closest unit.** Dispatch software uses GPS (AVL) on every truck and recommends the closest available unit for
   each call (Phoenix, Mooresville NC). The dispatcher accepts it. Units do not re-plan when a more urgent call arrives.
-- **Our assumptions:** 70% of buildings with people who need help call, 10–60 min before the fire; 4 call-takers,
+- **Our assumptions:** 70% of buildings with people who need help call, 1–15 min after the fire starts (the evacuation order); 4 call-takers,
   2.5 min per call; oldest answered call → closest free truck by road. All shown in the /sim assumptions panel.
 
 ## Sources (accessed 2026-11-14)

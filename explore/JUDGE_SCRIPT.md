@@ -41,8 +41,8 @@ Say: "To test the idea, we built a simulation of one fire. Every step uses real 
 3. **The trucks.** 8 fire engines start at the real LAFD stations south of the hills. They drive on the real
    street network (OpenStreetMap) at 30 km/h, and streets close when the fire reaches them.
 4. **Two runs, same everything.** Same fire, same people, same trucks, same 911 calls. Only the dispatch changes.
-   - **Today (911 calls):** in 70% of buildings with people who need help, someone calls 911, 10–60 minutes before
-     the fire arrives. 4 call-takers answer in the order calls arrive (2.5 min each). The oldest answered call gets
+   - **Today (911 calls):** in 70% of buildings with people who need help, someone calls 911, 1–15 minutes after
+     the fire starts and the evacuation order goes out. 4 call-takers answer in the order calls arrive (2.5 min each). The oldest answered call gets
      the closest free truck (this is what dispatch software does with truck GPS). Trucks do not re-plan. A building
      that never gets through gets no truck. On the map, a red 📞 shakes above a building that called and still waits.
    - **Roll Call:** described in section 4. It gets the same 911 calls, but it does not wait for them.
@@ -76,10 +76,10 @@ Two calls in the demo show this:
 
 | Same fire, people, calls and trucks | Today (911 calls) | Roll Call |
 |---|---|---|
-| People trapped | 48 | 4 |
-| ... of them people who needed help | 44 | 0 |
+| People trapped | 35 | 4 |
+| ... of them people who needed help | 31 | 0 |
 
-"In this simulation, Roll Call leaves about **92% fewer people trapped**." While the run plays, point at the red
+"In this simulation, Roll Call leaves about **89% fewer people trapped**." While the run plays, point at the red
 phones: those are people waiting in the 911 queue. In the Roll Call run, trucks are often already on the way
 before anyone calls.
 
@@ -89,7 +89,7 @@ before anyone calls.
 - **Every assumption is on screen** (click "show assumptions"). Nothing is hidden in the code.
 - **We tried changing each assumption.** Fewer or more people calling 911 (40% to 100%), 2 to 10 call-takers,
   slower or faster crews, trucks at 20 or 45 km/h, people leaving more slowly, other random seeds. Today's dispatch
-  traps 32 to 73 people; Roll Call traps 0 to 4. **Roll Call is better in every case.** The exact numbers
+  traps 21 to 62 people; Roll Call traps 0 to 4. **Roll Call is better in every case.** The exact numbers
   change a lot; the direction does not.
 - **We say what it is not.** This is a simulation with assumptions. It is not a count of real lives saved, and
   the phone calls in the demo are scripted. The fire model ignores slope, wind gusts and embers.

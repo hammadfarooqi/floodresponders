@@ -128,7 +128,7 @@ test("assignMax finds the best total on random small tables (checked by brute fo
 // ---------- policy "calls" (today's 911 dispatch, the baseline) ----------
 // Every building with people who need help calls (call_share 1), exactly 10 min before the fire; 1 call-taker, 2.5 min
 // a call. People who need help do not leave alone, so only trucks change anything.
-const CALLS = { truck_speed_kmh: 60, need_alone_rate_per_min: 0, call_share: 1, call_lead_min: [10, 10] as [number, number],
+const CALLS = { truck_speed_kmh: 60, need_alone_rate_per_min: 0, call_share: 1, call_lead_min: [10, 10] as [number, number], call_after_start_min: null,
                 call_takers: 1, call_handle_min: 2.5 };
 
 test("calls: the oldest answered call gets the truck, and a newer, closer call does not take it away", () => {

@@ -36,8 +36,9 @@ fires. Regenerate: `FIRE_TARGET=... FIRE_SPEED=0.4 python3 data/pipeline/fire_ti
 (`lib/sim/script.ts`; now 1865 N Fuller Apartments). The two scripted calls come early (0:06 stuck tenants,
 0:12 driver declines), because with this fire Roll Call reaches every building by about 0:25. Backup of the faster fire: `data/demo/backup_fire_speed_1.0/`.
 
-Result with default assumptions: today's 911 dispatch 48 trapped, Roll Call 4 (92% fewer; Roll Call's 4 could have
-left alone, which trucks do not help). Across assumption changes today traps 32-73 and Roll Call 0-4. Faster fires:
+Result with default assumptions: today's 911 dispatch 35 trapped, Roll Call 4 (89% fewer; Roll Call's 4 could have
+left alone, which trucks do not help). Across assumption changes today traps 21-62 and Roll Call 0-4.
+911 calls come 1-15 min after the fire starts (`call_after_start_min`; null = the old 10-60 min before the fire). Faster fires:
 speed 0.5: 99 vs 12; 0.6: 172 vs 27; 1.0: 764 vs 277. The numbers below this line were measured with the old,
 faster fire and `leave_by_risk=false`. Across assumption changes (seeds, truck 20/45 km/h, crew speed, call share 40%, 10 call-takers, leaving
 rate, slow-down 1.5–3x) today traps 419–909 and Roll Call 94–407. Ranking choices on the default run (Roll Call trapped): our 10%
