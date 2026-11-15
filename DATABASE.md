@@ -108,6 +108,16 @@ across structures (problem 38).
 | `assessor_address` | text | Street address of the lot, in capitals, with no unit number and no city. Every structure on the lot has the same one | 40,161 |
 | `assessor_sqft` | whole number | Floor area of the buildings on the lot, in square feet, for the whole lot (problem 38). Highest: 1,352,132. Not used in any rule yet | 38,296 |
 
+**Areas the structure stands in** (public data, joined by `lat` and `lng`; rules in `data/db/areas.py`)
+
+| Column | Type | Meaning | Filled |
+|---|---|---|---|
+| `fire_hazard_zone` | text | Fire Hazard Severity Zone on the CAL FIRE map dated 2025-03-24: `very_high` (21,888), `high` (1,268), `moderate` (934), or `none` (16,156: the structure is in no zone). It rates the land, not the building (problem 53) | 40,246 |
+| `census_tract` | text | 11-digit id of the 2020 census tract. 87 tracts here | 40,246 |
+| `tract_pct_age65` | 0 to 100 | Percent of the people in the tract aged 65 or more. Range 0 to 27.9, median 15.3. A value for the tract, not for this building (problem 54) | 40,246 |
+| `tract_pct_disability` | 0 to 100 | Percent of the people in the tract with a disability of any kind. Range 0 to 29.1, median 9.2 | 40,246 |
+| `tract_pct_no_vehicle` | 0 to 100 | Percent of the households in the tract with no vehicle. Range 0 to 46.5, median 6.9 | 39,273 |
+
 **Copied from CoStar** (null on every Vexcel-only row)
 
 | Column | Type | Meaning | Filled |
@@ -268,6 +278,8 @@ python3 data/db/load_supabase.py --apply-schema     # run schema.sql first, then
   Later runs do not call Vexcel. Delete that folder to fetch again.
 - The first run also downloads the County Assessor lots (public, no key, 36 calls, about 1 minute) into
   `data/cache/assessor_hollywood/` (or `--assessor-cache <folder>`). Delete that folder to fetch again.
+- The first run also downloads the fire hazard zones and the census tracts (public, no key, 2 calls) into
+  `data/cache/areas_hollywood/` (or `--areas-cache <folder>`).
 - The upload is an upsert. Row ids are made from the parcel and footprint, so a second run updates the same rows.
 - `--apply-schema` also needs `SUPABASE_PROJECT_REF` and `SUPABASE_ACCESS_TOKEN`. Or paste `schema.sql` into the
   Supabase SQL editor.
@@ -523,6 +535,19 @@ section where they fit. That is why the numbers are not in order.
     The other 13 name a different lot (a property can cover several lots, and CoStar lists only some).
 52. **An Assessor cache made before 2026-11-15 has no address and no floor area.** The import stops and tells you
     to delete `data/cache/assessor_hollywood/`. It does not upload empty values.
+
+53. **`fire_hazard_zone` rates the land, and we did not check its legal status.** CAL FIRE makes the map from
+    fuel, slope and weather. It says nothing about the building. The layer is CAL FIRE's map for city land dated
+    2025-03-24; we did not check if the City of Los Angeles has adopted it. More than half of the structures here
+    are `very_high`, so the column separates the hills from the flats and little more. The risk score does not
+    use it.
+54. **The tract columns describe about 4,000 people, not one building.** Every structure in a tract has the same
+    three values. They come from the CDC/ATSDR Social Vulnerability Index 2022. `tract_pct_no_vehicle` is null on
+    973 rows. All are in one tract, where the index has no value for it and gives 0 for the other two shares. So
+    a 0 there means "no data", not "no old people". The risk score still uses one fixed need rate (0.10) for every
+    building.
+55. **Fire zone and tract come from the center of the structure.** A structure that crosses a line gets one side.
+    We checked 40 structures against the publishers' own services and all 40 matched, for both columns.
 
 ### Facilities
 
