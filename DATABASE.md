@@ -236,12 +236,16 @@ building that is not a shed or garage, when its outline is within 50 m. The 50 m
 (`LINK_MAX_M` in `data/db/facilities.py`). Of the 69 points outside an outline, 55 are under 5 m from one, and the
 farthest is 31.5 m.
 
-### `buildings_geojson` and `buildings_near`
+### `buildings_geojson`, `buildings_near` and `buildings_fire_risk`
 
 - `buildings_geojson` has every `buildings` column plus `footprint_geojson`: the outline as a GeoJSON MultiPolygon,
   coordinates in `[lng, lat]` order.
 - `buildings_near(p_lat, p_lng, radius_m)` returns full `buildings` rows within `radius_m` meters of the point,
   measured to `location`, nearest first.
+- `buildings_fire_risk(p_origin_lat, p_origin_lng, p_wind_from_deg)` returns every building with its score for one
+  fire origin, highest first. The columns are `id`, `lat`, `lng`, `assessor_address`, `building_type`, `units`,
+  `units_source`, `confidence`, `people_at_risk`, `structure_factor`, `risk_score`, and three computed values:
+  `fire_distance_m`, `fire_factor` and `fire_risk_score`. See "How the score changes for a fire origin".
 
 ## How to read it
 
@@ -362,7 +366,8 @@ structure_factor = 1 + the sum of the adjustments below, kept between 0.5 and 2.
 ```
 
 **The score uses building data only.** It has no fire position, no fire arrival time and no distance to a
-responder. It does not say which buildings a fire threatens (problem 29).
+responder. It does not say which buildings a fire threatens (problem 29). For a score that uses a fire origin, see
+"How the score changes for a fire origin".
 
 People:
 
@@ -405,6 +410,51 @@ not a plain share (problem 28). `roof_condition` is not used yet; its direction 
 **Every number in this section is a first guess, not a measurement.** They are in `WEIGHTS` at the top of
 `data/db/risk_score.py`. If you change one, change these tables and run the import again. Nobody has checked the
 score against a real fire yet.
+
+## How the score changes for a fire origin
+
+Code: `data/db/fire_risk.py` (pure Python, tested) and the Postgres function `buildings_fire_risk` in
+`data/db/schema.sql`. Both hold the same rule. On 2026-11-14 they gave the same result for five origins on all
+40,246 rows. Nothing is stored: the function computes the values for each call.
+
+```
+fire_risk_score    = risk_score x fire_factor
+fire_factor        = 1 + boost x 0.5 ^ (effective distance / half distance)
+effective distance = distance from the origin, counted shorter downwind and longer upwind
+```
+
+**The fire raises a score. It does not replace it.** `fire_factor` is 2 at the origin and goes down toward 1 with
+distance, so the fire can at most double a score. A score of 0 stays 0 and a null score stays null. A building
+with a high `risk_score` that is farther away stays above a building with a low `risk_score` at the origin when
+its `risk_score` is more than 2 times higher.
+
+| Weight | Value | Meaning |
+|---|---|---|
+| `boost` | 1.0 | `fire_factor` at the origin is 1 + boost |
+| `half_distance_m` | 1,000 | The added part halves for each 1,000 m: x2 at 0 m, x1.5 at 1,000 m, x1.25 at 2,000 m, x1.06 at 4,000 m |
+| `wind_stretch` | 0.3 | With a wind direction, a distance straight downwind counts x0.7 and straight upwind x1.3. Across the wind there is no change |
+
+- **Shape.** With no wind, all buildings at one distance get one factor: a circle. With a wind direction, the
+  buildings with one factor lie on an ellipse that has the origin at one focus and is longer downwind. Its length
+  is 1.05 times its width, and its reach downwind is 1.86 times its reach upwind.
+- **`p_wind_from_deg`** is the compass direction the wind comes from (0 = north, 90 = east), the same convention
+  as `wind_from_deg` in `FireTimeline`. Leave it out for no wind.
+- **Distance** is measured to `lat` and `lng` of the building with flat-earth math. For one test origin it
+  differs from the PostGIS distance by at most 0.4% (17 m for a building 8 km away).
+
+REST call (server code only, with `SUPABASE_SECRET_KEY`):
+
+```
+POST $SUPABASE_URL/rest/v1/rpc/buildings_fire_risk
+{"p_origin_lat": 34.1128, "p_origin_lng": -118.351, "p_wind_from_deg": 315}
+```
+
+The call returns at most 1,000 rows (the REST limit). `p_limit` asks for fewer. The three weights are also
+parameters (`p_boost`, `p_half_distance_m`, `p_wind_stretch`); leave them out to use the values above.
+
+**The three weights are first guesses.** They are in `WEIGHTS` in `data/db/fire_risk.py` and are the defaults of
+the Postgres function. A test fails if the two differ. If you change one, change this table and apply
+`schema.sql` again.
 
 ## Known problems
 
@@ -504,6 +554,16 @@ section where they fit. That is why the numbers are not in order.
     changes the score (0.20 to 0.41).
 35. **5,837 structures that are not sheds or garages score 0.** They got 0 homes in the split of a lot or a CoStar
     property (problem 38). The other structures on the lot hold the people.
+56. **`fire_risk_score` is not a fire model.** It uses the distance to one point and an optional wind direction.
+    It has no terrain, no fuel, no roads and no time, and the fire does not grow. It does not say when the fire
+    reaches a building. `fire_arrival_min` from the fire timeline is a different value from a different model;
+    the two can disagree.
+57. **A fire changes the order only a little, by design.** For four test origins, 41 to 45 of the 50 highest
+    `fire_risk_score` rows are also in the 50 highest `risk_score` rows. A large block far from the fire stays
+    above a house at the origin. The rule "not in immediate danger is the lowest concern" is still not applied
+    by any score: the step that sends units must apply it (problem 29).
+58. **A building with a null `risk_score` has a null `fire_risk_score`,** also when it is at the origin. Schools,
+    hospitals and hotels are in this group (problem 30). `fire_factor` and `fire_distance_m` are filled for them.
 
 ### County Assessor and CoStar unit counts
 

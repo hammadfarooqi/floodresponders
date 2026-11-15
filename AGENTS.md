@@ -131,6 +131,19 @@ The building data is in Supabase. Read `DATABASE.md` before you read from or wri
 **Rule:** when you find a problem, a surprise or a limit in the database or in the data inside it, add it to
 `DATABASE.md` under "Known problems", in the same PR as your work. Never put sponsor data in that file.
 
+**Two scores exist. Use the right one** (added 2026-11-14, decided by Rasul):
+
+- `risk_score` is stored in `buildings`. It uses building data only and does not know where a fire is.
+- `fire_risk_score` is computed for one fire origin: `risk_score` x `fire_factor`, where `fire_factor` is 2 at
+  the origin and goes down toward 1 with distance. Get it from the database function
+  `buildings_fire_risk(p_origin_lat, p_origin_lng, p_wind_from_deg)` or from `data/db/fire_risk.py`.
+- When your code has a fire origin and ranks or colors buildings from the database, use `fire_risk_score`.
+  Do not write a second rule for "near the fire", and do not copy the weights: they are in `WEIGHTS` in
+  `data/db/fire_risk.py` only.
+- The origin comes from a person: the `/risk` page of `explore/` has a "Create fire origin" button. The demo run
+  on `/sim` and `/console` keeps its fixed fire and `fire_arrival_min`; this score does not replace them.
+- Rule, weights and limits: `DATABASE.md`, "How the score changes for a fire origin" and problems 56 to 58.
+
 ## One folder per agent (the default)
 
 Each agent works in its own folder (a git worktree) that `tools/coord new-agent` makes. Two agents in one
